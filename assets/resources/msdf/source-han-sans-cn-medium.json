@@ -102,6 +102,160 @@
             "page": 0
         },
         {
+            "id": 32452,
+            "index": 21186,
+            "char": "组",
+            "width": 32,
+            "height": 31,
+            "xoffset": -1,
+            "yoffset": -1,
+            "xadvance": 30,
+            "chnl": 15,
+            "x": 72,
+            "y": 36,
+            "page": 0
+        },
+        {
+            "id": 20214,
+            "index": 9006,
+            "char": "件",
+            "width": 32,
+            "height": 32,
+            "xoffset": -1,
+            "yoffset": -1,
+            "xadvance": 30,
+            "chnl": 15,
+            "x": 73,
+            "y": 0,
+            "page": 0
+        },
+        {
+            "id": 25903,
+            "index": 14663,
+            "char": "支",
+            "width": 32,
+            "height": 32,
+            "xoffset": -1,
+            "yoffset": -1,
+            "xadvance": 30,
+            "chnl": 15,
+            "x": 0,
+            "y": 107,
+            "page": 0
+        },
+        {
+            "id": 25345,
+            "index": 14105,
+            "char": "持",
+            "width": 32,
+            "height": 32,
+            "xoffset": -1,
+            "yoffset": -1,
+            "xadvance": 30,
+            "chnl": 15,
+            "x": 36,
+            "y": 107,
+            "page": 0
+        },
+        {
+            "id": 22522,
+            "index": 11297,
+            "char": "基",
+            "width": 32,
+            "height": 31,
+            "xoffset": -1,
+            "yoffset": -1,
+            "xadvance": 30,
+            "chnl": 15,
+            "x": 72,
+            "y": 107,
+            "page": 0
+        },
+        {
+            "id": 23545,
+            "index": 12315,
+            "char": "对",
+            "width": 32,
+            "height": 32,
+            "xoffset": -1,
+            "yoffset": -1,
+            "xadvance": 30,
+            "chnl": 15,
+            "x": 106,
+            "y": 71,
+            "page": 0
+        },
+        {
+            "id": 40784,
+            "index": 29491,
+            "char": "齐",
+            "width": 32,
+            "height": 32,
+            "xoffset": -1,
+            "yoffset": -2,
+            "xadvance": 30,
+            "chnl": 15,
+            "x": 108,
+            "y": 107,
+            "page": 0
+        },
+        {
+            "id": 21644,
+            "index": 10426,
+            "char": "和",
+            "width": 31,
+            "height": 32,
+            "xoffset": -1,
+            "yoffset": -1,
+            "xadvance": 30,
+            "chnl": 15,
+            "x": 109,
+            "y": 0,
+            "page": 0
+        },
+        {
+            "id": 33258,
+            "index": 21988,
+            "char": "自",
+            "width": 25,
+            "height": 32,
+            "xoffset": 3,
+            "yoffset": -1,
+            "xadvance": 30,
+            "chnl": 15,
+            "x": 0,
+            "y": 143,
+            "page": 0
+        },
+        {
+            "id": 25442,
+            "index": 14202,
+            "char": "换",
+            "width": 32,
+            "height": 32,
+            "xoffset": -1,
+            "yoffset": -1,
+            "xadvance": 30,
+            "chnl": 15,
+            "x": 72,
+            "y": 142,
+            "page": 0
+        },
+        {
+            "id": 34892,
+            "index": 23611,
+            "char": "行",
+            "width": 32,
+            "height": 32,
+            "xoffset": -1,
+            "yoffset": -1,
+            "xadvance": 30,
+            "chnl": 15,
+            "x": 29,
+            "y": 143,
+            "page": 0
+        },
+        {
             "id": 31034,
             "index": 19771,
             "char": "示",
@@ -111,7 +265,7 @@
             "yoffset": 1,
             "xadvance": 30,
             "chnl": 15,
-            "x": 72,
+            "x": 108,
             "y": 36,
             "page": 0
         },
@@ -125,8 +279,8 @@
             "yoffset": 0,
             "xadvance": 30,
             "chnl": 15,
-            "x": 73,
-            "y": 0,
+            "x": 108,
+            "y": 143,
             "page": 0
         },
         {
@@ -139,8 +293,64 @@
             "yoffset": -1,
             "xadvance": 30,
             "chnl": 15,
-            "x": 0,
-            "y": 107,
+            "x": 144,
+            "y": 0,
+            "page": 0
+        },
+        {
+            "id": 30784,
+            "index": 19522,
+            "char": "础",
+            "width": 31,
+            "height": 31,
+            "xoffset": -1,
+            "yoffset": -1,
+            "xadvance": 30,
+            "chnl": 15,
+            "x": 141,
+            "y": 143,
+            "page": 0
+        },
+        {
+            "id": 21160,
+            "index": 9948,
+            "char": "动",
+            "width": 31,
+            "height": 31,
+            "xoffset": 0,
+            "yoffset": -1,
+            "xadvance": 30,
+            "chnl": 15,
+            "x": 144,
+            "y": 35,
+            "page": 0
+        },
+        {
+            "id": 98,
+            "index": 67,
+            "char": "b",
+            "width": 19,
+            "height": 28,
+            "xoffset": 1,
+            "yoffset": 0,
+            "xadvance": 19,
+            "chnl": 15,
+            "x": 142,
+            "y": 70,
+            "page": 0
+        },
+        {
+            "id": 108,
+            "index": 77,
+            "char": "l",
+            "width": 9,
+            "height": 28,
+            "xoffset": 1,
+            "yoffset": 0,
+            "xadvance": 9,
+            "chnl": 15,
+            "x": 165,
+            "y": 70,
             "page": 0
         },
         {
@@ -153,8 +363,8 @@
             "yoffset": 2,
             "xadvance": 18,
             "chnl": 15,
-            "x": 35,
-            "y": 107,
+            "x": 144,
+            "y": 102,
             "page": 0
         },
         {
@@ -167,8 +377,8 @@
             "yoffset": 2,
             "xadvance": 17,
             "chnl": 15,
-            "x": 59,
-            "y": 107,
+            "x": 0,
+            "y": 179,
             "page": 0
         },
         {
@@ -181,8 +391,8 @@
             "yoffset": 2,
             "xadvance": 17,
             "chnl": 15,
-            "x": 81,
-            "y": 107,
+            "x": 22,
+            "y": 179,
             "page": 0
         },
         {
@@ -195,8 +405,8 @@
             "yoffset": 2,
             "xadvance": 17,
             "chnl": 15,
-            "x": 107,
-            "y": 0,
+            "x": 44,
+            "y": 179,
             "page": 0
         },
         {
@@ -209,8 +419,8 @@
             "yoffset": 2,
             "xadvance": 17,
             "chnl": 15,
-            "x": 107,
-            "y": 31,
+            "x": 67,
+            "y": 178,
             "page": 0
         },
         {
@@ -223,8 +433,8 @@
             "yoffset": 2,
             "xadvance": 17,
             "chnl": 15,
-            "x": 107,
-            "y": 62,
+            "x": 90,
+            "y": 178,
             "page": 0
         },
         {
@@ -237,8 +447,8 @@
             "yoffset": 2,
             "xadvance": 17,
             "chnl": 15,
-            "x": 103,
-            "y": 107,
+            "x": 112,
+            "y": 178,
             "page": 0
         },
         {
@@ -251,8 +461,8 @@
             "yoffset": 2,
             "xadvance": 17,
             "chnl": 15,
-            "x": 130,
-            "y": 0,
+            "x": 134,
+            "y": 178,
             "page": 0
         },
         {
@@ -265,8 +475,8 @@
             "yoffset": 2,
             "xadvance": 25,
             "chnl": 15,
-            "x": 125,
-            "y": 93,
+            "x": 179,
+            "y": 0,
             "page": 0
         },
         {
@@ -279,8 +489,8 @@
             "yoffset": 2,
             "xadvance": 21,
             "chnl": 15,
-            "x": 130,
-            "y": 31,
+            "x": 156,
+            "y": 178,
             "page": 0
         },
         {
@@ -293,8 +503,8 @@
             "yoffset": 2,
             "xadvance": 17,
             "chnl": 15,
-            "x": 129,
-            "y": 62,
+            "x": 180,
+            "y": 30,
             "page": 0
         },
         {
@@ -307,8 +517,8 @@
             "yoffset": 2,
             "xadvance": 17,
             "chnl": 15,
-            "x": 0,
-            "y": 142,
+            "x": 180,
+            "y": 60,
             "page": 0
         },
         {
@@ -321,8 +531,8 @@
             "yoffset": 2,
             "xadvance": 17,
             "chnl": 15,
-            "x": 21,
-            "y": 142,
+            "x": 180,
+            "y": 90,
             "page": 0
         },
         {
@@ -335,8 +545,78 @@
             "yoffset": 2,
             "xadvance": 17,
             "chnl": 15,
-            "x": 45,
-            "y": 138,
+            "x": 180,
+            "y": 120,
+            "page": 0
+        },
+        {
+            "id": 76,
+            "index": 45,
+            "char": "L",
+            "width": 17,
+            "height": 26,
+            "xoffset": 1,
+            "yoffset": 2,
+            "xadvance": 17,
+            "chnl": 15,
+            "x": 180,
+            "y": 150,
+            "page": 0
+        },
+        {
+            "id": 97,
+            "index": 66,
+            "char": "a",
+            "width": 17,
+            "height": 21,
+            "xoffset": 0,
+            "yoffset": 7,
+            "xadvance": 17,
+            "chnl": 15,
+            "x": 180,
+            "y": 180,
+            "page": 0
+        },
+        {
+            "id": 101,
+            "index": 70,
+            "char": "e",
+            "width": 18,
+            "height": 21,
+            "xoffset": -1,
+            "yoffset": 7,
+            "xadvance": 17,
+            "chnl": 15,
+            "x": 206,
+            "y": 0,
+            "page": 0
+        },
+        {
+            "id": 12289,
+            "index": 1141,
+            "char": "、",
+            "width": 13,
+            "height": 13,
+            "xoffset": -1,
+            "yoffset": 17,
+            "xadvance": 30,
+            "chnl": 15,
+            "x": 206,
+            "y": 25,
+            "page": 0
+        },
+        {
+            "id": 32,
+            "index": 1,
+            "char": " ",
+            "width": 0,
+            "height": 0,
+            "xoffset": -2,
+            "yoffset": 24,
+            "xadvance": 7,
+            "chnl": 15,
+            "x": 176,
+            "y": 102,
             "page": 0
         }
     ],
@@ -369,7 +649,27 @@
             "6",
             "7",
             "8",
-            "9"
+            "9",
+            "L",
+            "a",
+            "b",
+            "e",
+            "l",
+            " ",
+            "组",
+            "件",
+            "支",
+            "持",
+            "基",
+            "础",
+            "对",
+            "齐",
+            "、",
+            "和",
+            "自",
+            "动",
+            "换",
+            "行"
         ],
         "unicode": 1,
         "stretchH": 100,
@@ -390,8 +690,8 @@
     "common": {
         "lineHeight": 30,
         "base": 26,
-        "scaleW": 150,
-        "scaleH": 168,
+        "scaleW": 225,
+        "scaleH": 206,
         "pages": 1,
         "packed": 0,
         "alphaChnl": 0,
@@ -413,6 +713,41 @@
             "first": 70,
             "second": 83,
             "amount": -1
+        },
+        {
+            "first": 70,
+            "second": 97,
+            "amount": -1
+        },
+        {
+            "first": 70,
+            "second": 101,
+            "amount": -1
+        },
+        {
+            "first": 76,
+            "second": 83,
+            "amount": -1
+        },
+        {
+            "first": 76,
+            "second": 101,
+            "amount": 0
+        },
+        {
+            "first": 98,
+            "second": 97,
+            "amount": 0
+        },
+        {
+            "first": 101,
+            "second": 83,
+            "amount": -1
+        },
+        {
+            "first": 101,
+            "second": 97,
+            "amount": 0
         }
     ]
 }

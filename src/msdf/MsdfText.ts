@@ -125,7 +125,46 @@ export class MsdfBitmapFont {
         return new MsdfTextSprite(this, options);
     }
 
-    buildLayout(text: string, fontSize: number, letterSpacing: number = 0): MsdfLayout {
+    wrapText(text: string, fontSize: number, maxWidth: number, letterSpacing: number = 0): string {
+        if (maxWidth <= 0) {
+            return text;
+        }
+
+        const scale = fontSize / this.lineHeight;
+        let lineWidth = 0;
+        let previousCode = -1;
+        let result = "";
+
+        for (const char of text) {
+            if (char === "\n") {
+                result += char;
+                lineWidth = 0;
+                previousCode = -1;
+                continue;
+            }
+
+            const glyph = this.glyphs.get(char);
+            const advance = glyph ? glyph.xadvance * scale : fontSize * 0.5;
+            const kern = previousCode >= 0 && glyph
+                ? (this.kernings.get(kerningKey(previousCode, glyph.id)) ?? 0) * scale
+                : 0;
+            const nextWidth = lineWidth + kern + advance + letterSpacing * scale;
+
+            if (lineWidth > 0 && nextWidth > maxWidth) {
+                result += "\n";
+                lineWidth = 0;
+                previousCode = -1;
+            }
+
+            result += char;
+            lineWidth += (glyph ? glyph.xadvance * scale : fontSize * 0.5) + kern + letterSpacing * scale;
+            previousCode = glyph?.id ?? -1;
+        }
+
+        return result;
+    }
+
+    buildLayout(text: string, fontSize: number, letterSpacing: number = 0, lineSpacing: number = 0): MsdfLayout {
         const scale = fontSize / this.lineHeight;
         const vertices: number[] = [];
         const uvs: number[] = [];
@@ -148,7 +187,7 @@ export class MsdfBitmapFont {
                 widestLine = Math.max(widestLine, currentLineWidth);
                 currentLineWidth = 0;
                 penX = 0;
-                penY += this.lineHeight * scale;
+                penY += this.lineHeight * scale + lineSpacing;
                 previousCode = -1;
                 lineCount += 1;
                 continue;
@@ -215,11 +254,11 @@ export class MsdfBitmapFont {
                 uvs: new Float32Array(),
                 indices: new Uint16Array(),
                 width: widestLine,
-                height: lineCount * this.lineHeight * scale
+                height: lineCount * this.lineHeight * scale + Math.max(0, lineCount - 1) * lineSpacing
             };
         }
 
-        maxY = Math.max(maxY, lineCount * this.lineHeight * scale);
+        maxY = Math.max(maxY, lineCount * this.lineHeight * scale + Math.max(0, lineCount - 1) * lineSpacing);
 
         for (let i = 0; i < vertices.length; i += 2) {
             vertices[i] -= minX;
@@ -231,7 +270,7 @@ export class MsdfBitmapFont {
             uvs: new Float32Array(uvs),
             indices: new Uint16Array(indices),
             width: Math.max(widestLine, maxX - minX),
-            height: Math.max(lineCount * this.lineHeight * scale, maxY - minY)
+            height: Math.max(lineCount * this.lineHeight * scale + Math.max(0, lineCount - 1) * lineSpacing, maxY - minY)
         };
     }
 }
@@ -242,16 +281,18 @@ export class MsdfTextSprite extends Laya.Sprite {
     private _text: string;
     private _fontSize: number;
     private _letterSpacing: number;
+    private _lineSpacing: number;
     private _textColor: Laya.Vector4;
     private _outlineColor: Laya.Vector4;
     private _outlineWidth: number;
 
-    constructor(private readonly font: MsdfBitmapFont, options: MsdfTextOptions = {}) {
+    constructor(private font: MsdfBitmapFont, options: MsdfTextOptions = {}) {
         super();
 
         this._text = options.text ?? "";
         this._fontSize = options.fontSize ?? font.lineHeight;
         this._letterSpacing = options.letterSpacing ?? 0;
+        this._lineSpacing = 0;
         this._textColor = options.textColor ?? DEFAULT_TEXT_COLOR.clone();
         this._outlineColor = options.outlineColor ?? DEFAULT_OUTLINE_COLOR.clone();
         this._outlineWidth = options.outlineWidth ?? 0;
@@ -293,6 +334,14 @@ export class MsdfTextSprite extends Laya.Sprite {
         this.refresh();
     }
 
+    set lineSpacing(value: number) {
+        if (this._lineSpacing === value) {
+            return;
+        }
+        this._lineSpacing = value;
+        this.refresh();
+    }
+
     set textColor(value: Laya.Vector4) {
         this._textColor = value;
         this.syncMaterial();
@@ -308,8 +357,14 @@ export class MsdfTextSprite extends Laya.Sprite {
         this.syncMaterial();
     }
 
+    resetFont(font: MsdfBitmapFont): void {
+        this.font = font;
+        this.syncMaterial();
+        this.refresh();
+    }
+
     refresh(): void {
-        const layout = this.font.buildLayout(this._text, this._fontSize, this._letterSpacing);
+        const layout = this.font.buildLayout(this._text, this._fontSize, this._letterSpacing, this._lineSpacing);
 
         this.graphics.clear(true);
 
