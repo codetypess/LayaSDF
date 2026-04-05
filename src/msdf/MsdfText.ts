@@ -250,9 +250,9 @@ export class MsdfBitmapFont {
 
         if (quadCount === 0) {
             return {
-                vertices: new Float32Array(),
-                uvs: new Float32Array(),
-                indices: new Uint16Array(),
+                vertices: new Float32Array(0),
+                uvs: new Float32Array(0),
+                indices: new Uint16Array(0),
                 width: widestLine,
                 height: lineCount * this.lineHeight * scale + Math.max(0, lineCount - 1) * lineSpacing
             };
