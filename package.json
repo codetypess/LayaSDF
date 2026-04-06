@@ -1,7 +1,7 @@
 {
   "scripts": {
-    "msdf:30": "node ./scripts/generate-msdf-font.mjs --font-size 30 --distance-range 4 --padding 2 --font assets/resources/source-han-sans-cn-medium.ttf --charset assets/resources/msdf/demo-charset.txt",
-    "msdf:25": "node ./scripts/generate-msdf-font.mjs --font-size 25 --distance-range 3 --padding 2 --font assets/resources/source-han-sans-cn-medium.ttf --charset assets/resources/msdf/demo-charset.txt"
+    "msdf:30": "node ./scripts/generate-msdf-font.mjs --font-size 30 --distance-range 8 --padding 8 --font assets/resources/source-han-sans-cn-medium.ttf --charset assets/resources/msdf/demo-charset.txt",
+    "msdf:25": "node ./scripts/generate-msdf-font.mjs --font-size 25 --distance-range 8 --padding 8 --font assets/resources/source-han-sans-cn-medium.ttf --charset assets/resources/msdf/demo-charset.txt"
   },
   "devDependencies": {
     "msdf-bmfont-xml": "^2.8.0"

@@ -53,6 +53,103 @@ type MsdfTextOptions = {
 
 const DEFAULT_TEXT_COLOR = new Laya.Vector4(1, 1, 1, 1);
 const DEFAULT_OUTLINE_COLOR = new Laya.Vector4(0, 0, 0, 1);
+const STYLE_TEXTURE_WIDTH = 256;
+const STYLE_TEXTURE_HEIGHT = 2;
+
+function createEmptyLayout(): MsdfLayout {
+    return {
+        vertices: new Float32Array(0),
+        uvs: new Float32Array(0),
+        indices: new Uint16Array(0),
+        width: 0,
+        height: 0
+    };
+}
+
+function clamp01(value: number): number {
+    return Math.max(0, Math.min(1, value));
+}
+
+function colorKey(color: Laya.Vector4): string {
+    return `${color.x.toFixed(4)},${color.y.toFixed(4)},${color.z.toFixed(4)},${color.w.toFixed(4)}`;
+}
+
+function styleKey(textColor: Laya.Vector4, outlineColor: Laya.Vector4): string {
+    return `${colorKey(textColor)}|${colorKey(outlineColor)}`;
+}
+
+function writePackedColor(target: Uint8Array, offset: number, color: Laya.Vector4): void {
+    target[offset] = Math.round(clamp01(color.x) * 255);
+    target[offset + 1] = Math.round(clamp01(color.y) * 255);
+    target[offset + 2] = Math.round(clamp01(color.z) * 255);
+    target[offset + 3] = Math.round(clamp01(color.w) * 255);
+}
+
+let cachedBatchStyleSupport: boolean | null = null;
+
+function supportsMsdfBatchStyle(): boolean {
+    if (cachedBatchStyleSupport != null) {
+        return cachedBatchStyleSupport;
+    }
+
+    cachedBatchStyleSupport = ((Laya as any).DrawTrianglesCmd?.STYLE_PAYLOAD_VERSION ?? 0) >= 1;
+    return cachedBatchStyleSupport;
+}
+
+class MsdfStyleRegistry {
+    readonly textureSize = new Laya.Vector2(STYLE_TEXTURE_WIDTH, STYLE_TEXTURE_HEIGHT);
+    readonly texture: Laya.Texture2D;
+
+    private readonly styleMap = new Map<string, number>();
+    private readonly pixels = new Uint8Array(STYLE_TEXTURE_WIDTH * STYLE_TEXTURE_HEIGHT * 4);
+    private styleCount = 0;
+
+    constructor() {
+        this.texture = new Laya.Texture2D(STYLE_TEXTURE_WIDTH, STYLE_TEXTURE_HEIGHT, Laya.TextureFormat.R8G8B8A8, false, false, false);
+        this.texture.filterMode = Laya.FilterMode.Point;
+        this.texture.setPixelsData(this.pixels, false, false);
+    }
+
+    register(textColor: Laya.Vector4, outlineColor: Laya.Vector4): number {
+        const key = styleKey(textColor, outlineColor);
+        const cached = this.styleMap.get(key);
+        if (cached != null) {
+            return cached;
+        }
+
+        if (this.styleCount >= STYLE_TEXTURE_WIDTH) {
+            throw new Error(`MSDF style registry is full. Max styles: ${STYLE_TEXTURE_WIDTH}`);
+        }
+
+        const styleIndex = this.styleCount++;
+        this.styleMap.set(key, styleIndex);
+
+        writePackedColor(this.pixels, styleIndex * 4, textColor);
+        writePackedColor(this.pixels, (STYLE_TEXTURE_WIDTH + styleIndex) * 4, outlineColor);
+        this.texture.setPixelsData(this.pixels, false, false);
+
+        return styleIndex;
+    }
+}
+
+class MsdfFontRenderState {
+    readonly styleRegistry = new MsdfStyleRegistry();
+    readonly material: Laya.Material;
+
+    constructor(font: MsdfBitmapFont) {
+        this.material = new Laya.Material();
+        applyMaterialBase(this.material, font, this.styleRegistry, true);
+    }
+}
+
+function applyMaterialBase(material: Laya.Material, font: MsdfBitmapFont, styleRegistry: MsdfStyleRegistry, useStyleTexture: boolean): void {
+    material.setShaderName("MsdfTextShader");
+    material.setVector2("u_AtlasSize", new Laya.Vector2(font.atlasWidth, font.atlasHeight));
+    material.setFloat("u_DistanceRange", font.distanceRange);
+    material.setTexture("u_StyleTexture", styleRegistry.texture);
+    material.setVector2("u_StyleTextureSize", styleRegistry.textureSize);
+    material.setFloat("u_UseStyleTexture", useStyleTexture ? 1 : 0);
+}
 
 function kerningKey(first: number, second: number): string {
     return `${first}:${second}`;
@@ -84,6 +181,7 @@ export class MsdfBitmapFont {
 
     private readonly glyphs = new Map<string, MsdfGlyph>();
     private readonly kernings = new Map<string, number>();
+    private _renderState: MsdfFontRenderState | null = null;
 
     static fromResources(texture: Laya.Texture, rawData: any): MsdfBitmapFont {
         return new MsdfBitmapFont(texture, normalizeFontJson(rawData));
@@ -119,6 +217,14 @@ export class MsdfBitmapFont {
         for (const kerning of data.kernings ?? []) {
             this.kernings.set(kerningKey(kerning.first, kerning.second), kerning.amount);
         }
+    }
+
+    get renderState(): MsdfFontRenderState {
+        if (!this._renderState) {
+            this._renderState = new MsdfFontRenderState(this);
+        }
+
+        return this._renderState;
     }
 
     createText(options: MsdfTextOptions): MsdfTextSprite {
@@ -276,7 +382,8 @@ export class MsdfBitmapFont {
 }
 
 export class MsdfTextSprite extends Laya.Sprite {
-    private readonly materialInstance: Laya.Material;
+    private materialInstance: Laya.Material;
+    private readonly useBatchStyleData: boolean;
 
     private _text: string;
     private _fontSize: number;
@@ -285,6 +392,8 @@ export class MsdfTextSprite extends Laya.Sprite {
     private _textColor: Laya.Vector4;
     private _outlineColor: Laya.Vector4;
     private _outlineWidth: number;
+    private _layout: MsdfLayout = createEmptyLayout();
+    private _styleIndex = 0;
 
     constructor(private font: MsdfBitmapFont, options: MsdfTextOptions = {}) {
         super();
@@ -296,9 +405,11 @@ export class MsdfTextSprite extends Laya.Sprite {
         this._textColor = options.textColor ?? DEFAULT_TEXT_COLOR.clone();
         this._outlineColor = options.outlineColor ?? DEFAULT_OUTLINE_COLOR.clone();
         this._outlineWidth = options.outlineWidth ?? 0;
+        this.useBatchStyleData = supportsMsdfBatchStyle();
 
-        this.materialInstance = new Laya.Material();
-        this.materialInstance.setShaderName("MsdfTextShader");
+        this.materialInstance = this.useBatchStyleData
+            ? this.font.renderState.material
+            : new Laya.Material();
         this.material = this.materialInstance;
         this.mouseThrough = true;
 
@@ -344,42 +455,85 @@ export class MsdfTextSprite extends Laya.Sprite {
 
     set textColor(value: Laya.Vector4) {
         this._textColor = value;
-        this.syncMaterial();
+        if (this.useBatchStyleData) {
+            this.redraw();
+        } else {
+            this.syncMaterial();
+        }
     }
 
     set outlineColor(value: Laya.Vector4) {
         this._outlineColor = value;
-        this.syncMaterial();
+        if (this.useBatchStyleData) {
+            this.redraw();
+        } else {
+            this.syncMaterial();
+        }
     }
 
     set outlineWidth(value: number) {
         this._outlineWidth = value;
-        this.syncMaterial();
+        if (this.useBatchStyleData) {
+            this.redraw();
+        } else {
+            this.syncMaterial();
+        }
     }
 
     resetFont(font: MsdfBitmapFont): void {
         this.font = font;
+        if (this.useBatchStyleData) {
+            this.materialInstance = this.font.renderState.material;
+            this.material = this.materialInstance;
+        }
         this.syncMaterial();
         this.refresh();
     }
 
     refresh(): void {
-        const layout = this.font.buildLayout(this._text, this._fontSize, this._letterSpacing, this._lineSpacing);
-
-        this.graphics.clear(true);
-
-        if (layout.indices.length > 0) {
-            this.graphics.drawTriangles(this.font.texture, 0, 0, layout.vertices, layout.uvs, layout.indices);
-        }
-
-        this.size(layout.width, layout.height);
+        this._layout = this.font.buildLayout(this._text, this._fontSize, this._letterSpacing, this._lineSpacing);
+        this.redraw();
     }
 
     private syncMaterial(): void {
+        const renderState = this.font.renderState;
+
+        if (this.useBatchStyleData) {
+            this._styleIndex = renderState.styleRegistry.register(this._textColor, this._outlineColor);
+            return;
+        }
+
+        applyMaterialBase(this.materialInstance, this.font, renderState.styleRegistry, false);
         this.materialInstance.setVector4("u_TextColor", this._textColor);
         this.materialInstance.setVector4("u_OutlineColor", this._outlineColor);
-        this.materialInstance.setVector2("u_AtlasSize", new Laya.Vector2(this.font.atlasWidth, this.font.atlasHeight));
-        this.materialInstance.setFloat("u_DistanceRange", this.font.distanceRange);
         this.materialInstance.setFloat("u_OutlineWidth", this._outlineWidth);
+    }
+
+    private redraw(): void {
+        this.syncMaterial();
+        this.graphics.clear(true);
+
+        if (this._layout.indices.length > 0) {
+            if (this.useBatchStyleData) {
+                this.graphics.drawTriangles(
+                    this.font.texture,
+                    0,
+                    0,
+                    this._layout.vertices,
+                    this._layout.uvs,
+                    this._layout.indices,
+                    null,
+                    1,
+                    null,
+                    null,
+                    this._styleIndex,
+                    this._outlineWidth
+                );
+            } else {
+                this.graphics.drawTriangles(this.font.texture, 0, 0, this._layout.vertices, this._layout.uvs, this._layout.indices);
+            }
+        }
+
+        this.size(this._layout.width, this._layout.height);
     }
 }

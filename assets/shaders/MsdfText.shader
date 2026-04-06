@@ -10,7 +10,10 @@ Shader3D Start
         u_OutlineColor: { type: Vector4, default: [0, 0, 0, 1] },
         u_OutlineWidth: { type: Float, default: 0.0 },
         u_AtlasSize: { type: Vector2, default: [256, 256] },
-        u_DistanceRange: { type: Float, default: 4.0 }
+        u_DistanceRange: { type: Float, default: 4.0 },
+        u_UseStyleTexture: { type: Float, default: 0.0 },
+        u_StyleTexture: { type: Texture2D },
+        u_StyleTextureSize: { type: Vector2, default: [256, 2] }
     },
     attributeMap: {
         a_posuv: Vector4,
@@ -36,6 +39,9 @@ GLSL Start
     #define SHADER_NAME MsdfTextShader
     #include "Sprite2DVertex.glsl";
 
+    varying float v_styleIndex;
+    varying float v_outlineWidth;
+
     void main() {
         vertexInfo info;
         getVertexInfo(info);
@@ -44,6 +50,8 @@ GLSL Start
         v_texcoordAlpha = info.texcoordAlpha;
         v_useTex = info.useTex;
         v_color = info.color;
+        v_styleIndex = a_attribFlags.g;
+        v_outlineWidth = a_attribFlags.b;
 
         vec4 pos;
         getPosition(pos);
@@ -67,6 +75,9 @@ GLSL Start
 
     #include "Sprite2DFrag.glsl";
 
+    varying float v_styleIndex;
+    varying float v_outlineWidth;
+
     float median3(float r, float g, float b) {
         return max(min(r, g), min(max(r, g), b));
     }
@@ -85,11 +96,22 @@ GLSL Start
         float sd = median3(msdf.r, msdf.g, msdf.b);
         float screenDistance = screenPxRange(texcoord) * (sd - 0.5);
 
+        vec4 fillColor = u_TextColor;
+        vec4 outlineColor = u_OutlineColor;
+        float outlineWidth = u_OutlineWidth;
+
+        if (u_UseStyleTexture > 0.5) {
+            float styleX = (v_styleIndex + 0.5) / u_StyleTextureSize.x;
+            fillColor = texture2D(u_StyleTexture, vec2(styleX, 0.5 / u_StyleTextureSize.y));
+            outlineColor = texture2D(u_StyleTexture, vec2(styleX, 1.5 / u_StyleTextureSize.y));
+            outlineWidth = v_outlineWidth;
+        }
+
         float fillAlpha = clamp(screenDistance + 0.5, 0.0, 1.0);
-        float strokeAlpha = clamp(screenDistance + u_OutlineWidth + 0.5, 0.0, 1.0);
+        float strokeAlpha = clamp(screenDistance + outlineWidth + 0.5, 0.0, 1.0);
         float outlineAlpha = max(strokeAlpha - fillAlpha, 0.0);
 
-        vec4 color = u_OutlineColor * outlineAlpha + u_TextColor * fillAlpha;
+        vec4 color = outlineColor * outlineAlpha + fillColor * fillAlpha;
 
         setglColor(color);
     }

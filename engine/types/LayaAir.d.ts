@@ -22183,6 +22183,11 @@ declare module Laya {
          */
         static ID: string;
         /**
+         * @en Marker for engines that support per-draw style payloads.
+         * @zh 支持每次绘制样式负载的引擎标记。
+         */
+        static STYLE_PAYLOAD_VERSION: number;
+        /**
          * @en The texture to be drawn.
          * @zh 要绘制的纹理。
          */
@@ -22233,6 +22238,16 @@ declare module Laya {
          */
         color: number | null;
         /**
+         * @en Per-draw style index payload.
+         * @zh 每次绘制的样式索引负载。
+         */
+        styleIndex: number;
+        /**
+         * @en Per-draw outline width payload.
+         * @zh 每次绘制的描边宽度负载。
+         */
+        outlineWidth: number;
+        /**
          * @en Create a DrawTrianglesCmd instance
          * @param texture The texture to be drawn
          * @param x X-axis offset
@@ -22258,7 +22273,7 @@ declare module Laya {
          * @param blendMode 混合模式
          * @returns 绘制三角形命令实例
          */
-        static create(texture: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, matrix: Matrix | null, alpha: number, color: string | number, blendMode: string | null): DrawTrianglesCmd;
+        static create(texture: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, matrix: Matrix | null, alpha: number, color: string | number | number[], blendMode: string | null, styleIndex?: number, outlineWidth?: number): DrawTrianglesCmd;
         /**
          * @en Recycle to the object pool
          * @zh 回收到对象池
@@ -23382,7 +23397,7 @@ declare module Laya {
          * @param color （可选）颜色变换。默认为null。
          * @param blendMode （可选）混合模式。默认为null。
          */
-        drawTriangles(texture: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, matrix?: Matrix | null, alpha?: number, color?: string | number, blendMode?: string | null): DrawTrianglesCmd;
+        drawTriangles(texture: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, matrix?: Matrix | null, alpha?: number, color?: string | number | number[], blendMode?: string | null, styleIndex?: number, outlineWidth?: number): DrawTrianglesCmd;
         /**
          * @zh 用纹理填充
          * @param texture 用于填充的纹理
@@ -55665,7 +55680,7 @@ declare module Laya {
             number,
             number
         ][], x: number, y: number): void;
-        drawTriangles(tex: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, matrix: Matrix, alpha: number | null, blendMode: string, colorNum?: number): void;
+        drawTriangles(tex: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, matrix: Matrix, alpha: number | null, blendMode: string, colorNum?: number | number[], styleIndex?: number, outlineWidth?: number): void;
         transform(a: number, b: number, c: number, d: number, tx: number, ty: number): void;
         rotate(angle: number): void;
         scale(scaleX: number, scaleY: number): void;

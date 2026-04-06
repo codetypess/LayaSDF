@@ -1,6 +1,9 @@
 {
-    "modules": {
-        "laya.ui": true,
-        "laya.d3": true
-    }
+  "modules": {
+    "laya.ui": true,
+    "laya.d3": true
+  },
+  "splash": {
+    "fit": "center"
+  }
 }

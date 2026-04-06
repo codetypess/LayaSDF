@@ -19,10 +19,10 @@ export class Main extends Laya.Script {
         this.owner.addChild(title);
 
         const sample = new MsdfLabel("沉浸描边阴影0123456789");
-        sample.fontSize = 54;
+        sample.fontSize = 20;
         sample.color = "#bae7fa";
         sample.strokeColor = "#bd0b0b";
-        sample.stroke = 3;
+        sample.stroke = 2;
         sample.pos(80, 188);
         this.owner.addChild(sample);
 
