@@ -21,19 +21,20 @@ export class Main extends Laya.Script {
         const sectionTitle = new Laya.Label();
         sectionTitle.text = "描边对比：统一 stroke = 3，观察 20 / 25 / 30 / 35 / 40 / 45";
         sectionTitle.fontSize = 22;
-        sectionTitle.color = "#9cb4c7";
+        sectionTitle.color = "#bae7fa";
         sectionTitle.font = "resources/source-han-sans-cn-medium.ttf";
         sectionTitle.pos(84, 130);
         this.owner.addChild(sectionTitle);
 
         const sizes = [20, 25, 30, 35, 40, 45];
-        const strokes = [2, 2.5, 3, 3, 3, 3];
-        // const strokes = [0,0,0,0,0,0];
+        // const strokes = [1.5, 2.5, 3, 3, 3, 3];
+        const strokes = [0,0,0,3,3,3];
+        const strokeColors = ["#f44336", "#ff9800", "#ffeb3b", "#4caf50", "#2196f3", "#9c27b0"];
         let leftY = 170;
 
         for (let i = 0; i < sizes.length; i++) {
             const fontSize = sizes[i];
-            const sample = this.createSampleLabel(fontSize, strokes[i]);
+            const sample = this.createSampleLabel(fontSize, strokes[i], strokeColors[i]);
             sample.pos(84, leftY);
             this.owner.addChild(sample);
 
@@ -65,11 +66,11 @@ export class Main extends Laya.Script {
         this.owner.addChild(note);
     }
 
-    private createSampleLabel(fontSize: number, stroke: number): MsdfLabel {
-        const sample = new MsdfLabel(`${fontSize}px 我们沉浸描边影响测试 0123 S=${stroke}`);
+    private createSampleLabel(fontSize: number, stroke: number, strokeColor: string): MsdfLabel {
+        const sample = new MsdfLabel(`${fontSize}px 我们沉浸描边影响测试演示繁鼻 0123 S=${stroke}`);
         sample.fontSize = fontSize;
         sample.color = "#bae7fa";
-        sample.strokeColor = "#bd0b0b";
+        sample.strokeColor = strokeColor;
         sample.stroke = stroke;
         return sample;
     }
