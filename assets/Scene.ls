@@ -14,22 +14,5 @@
       "_$type": "7bad1742-6eed-4d8d-81c0-501dc5bf03d6",
       "scriptPath": "../src/Main.ts"
     }
-  ],
-  "_$child": [
-    {
-      "_$id": "qi1nskdw",
-      "_$type": "Label",
-      "name": "Label",
-      "x": 11,
-      "y": 7,
-      "width": 120,
-      "height": 28,
-      "text": "沉浸渲染，测试",
-      "font": "res://28d2e5f5-acac-449f-b332-0670cf326c49",
-      "fontSize": 30,
-      "color": "#FFFFFF",
-      "valign": "top",
-      "padding": "0,0,0,0"
-    }
   ]
 }
