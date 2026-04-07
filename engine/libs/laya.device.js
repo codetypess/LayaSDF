@@ -138,23 +138,6 @@
         }
     }
 
-    class Media {
-        constructor() {
-        }
-        static supported() {
-            return !!Laya.ILaya.Browser.window.navigator.getUserMedia;
-        }
-        static getMedia(options, onSuccess, onError) {
-            if (Laya.ILaya.Browser.window.navigator.getUserMedia) {
-                Laya.ILaya.Browser.window.navigator.getUserMedia(options, function (stream) {
-                    onSuccess.runWith(Laya.ILaya.Browser.window.URL.createObjectURL(stream));
-                }, function (err) {
-                    onError.runWith(err);
-                });
-            }
-        }
-    }
-
     class Gyroscope extends Laya.EventDispatcher {
         static get instance() {
             Gyroscope._instance = Gyroscope._instance || new Gyroscope(0);
@@ -181,6 +164,23 @@
         }
     }
     Gyroscope.info = new RotationInfo();
+
+    class Media {
+        constructor() {
+        }
+        static supported() {
+            return !!Laya.ILaya.Browser.window.navigator.getUserMedia;
+        }
+        static getMedia(options, onSuccess, onError) {
+            if (Laya.ILaya.Browser.window.navigator.getUserMedia) {
+                Laya.ILaya.Browser.window.navigator.getUserMedia(options, function (stream) {
+                    onSuccess.runWith(Laya.ILaya.Browser.window.URL.createObjectURL(stream));
+                }, function (err) {
+                    onError.runWith(err);
+                });
+            }
+        }
+    }
 
     class GeolocationInfo {
         setPosition(pos) {

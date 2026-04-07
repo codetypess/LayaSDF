@@ -6,19 +6,16 @@ Shader3D Start
     supportReflectionProbe:false,
     shaderType:2,
     uniformMap:{
-        u_TextColor: { type: Vector4, default: [1, 1, 1, 1] },
-        u_OutlineColor: { type: Vector4, default: [0, 0, 0, 1] },
-        u_OutlineWidth: { type: Float, default: 0.0 },
         u_AtlasSize: { type: Vector2, default: [256, 256] },
-        u_DistanceRange: { type: Float, default: 4.0 },
-        u_UseStyleTexture: { type: Float, default: 0.0 },
-        u_StyleTexture: { type: Texture2D },
-        u_StyleTextureSize: { type: Vector2, default: [256, 2] }
+        u_DistanceRange: { type: Float, default: 4.0 }
     },
     attributeMap: {
         a_posuv: Vector4,
         a_attribColor: Vector4,
         a_attribFlags: Vector4,
+        a_msdfFillColor: Vector4,
+        a_msdfOutlineColor: Vector4,
+        a_msdfParams: Float,
     },
     defines: {
         TEXTUREVS: { type: bool, default: true }
@@ -39,8 +36,9 @@ GLSL Start
     #define SHADER_NAME MsdfTextShader
     #include "Sprite2DVertex.glsl";
 
-    varying float v_styleIndex;
-    varying float v_outlineWidth;
+    varying vec4 v_msdfFillColor;
+    varying vec4 v_msdfOutlineColor;
+    varying float v_msdfParams;
 
     void main() {
         vertexInfo info;
@@ -50,8 +48,9 @@ GLSL Start
         v_texcoordAlpha = info.texcoordAlpha;
         v_useTex = info.useTex;
         v_color = info.color;
-        v_styleIndex = a_attribFlags.g;
-        v_outlineWidth = a_attribFlags.b;
+        v_msdfFillColor = a_msdfFillColor;
+        v_msdfOutlineColor = a_msdfOutlineColor;
+        v_msdfParams = a_msdfParams;
 
         vec4 pos;
         getPosition(pos);
@@ -75,8 +74,9 @@ GLSL Start
 
     #include "Sprite2DFrag.glsl";
 
-    varying float v_styleIndex;
-    varying float v_outlineWidth;
+    varying vec4 v_msdfFillColor;
+    varying vec4 v_msdfOutlineColor;
+    varying float v_msdfParams;
 
     float median3(float r, float g, float b) {
         return max(min(r, g), min(max(r, g), b));
@@ -96,16 +96,9 @@ GLSL Start
         float sd = median3(msdf.r, msdf.g, msdf.b);
         float screenDistance = screenPxRange(texcoord) * (sd - 0.5);
 
-        vec4 fillColor = u_TextColor;
-        vec4 outlineColor = u_OutlineColor;
-        float outlineWidth = u_OutlineWidth;
-
-        if (u_UseStyleTexture > 0.5) {
-            float styleX = (v_styleIndex + 0.5) / u_StyleTextureSize.x;
-            fillColor = texture2D(u_StyleTexture, vec2(styleX, 0.5 / u_StyleTextureSize.y));
-            outlineColor = texture2D(u_StyleTexture, vec2(styleX, 1.5 / u_StyleTextureSize.y));
-            outlineWidth = v_outlineWidth;
-        }
+        vec4 fillColor = v_msdfFillColor;
+        vec4 outlineColor = v_msdfOutlineColor;
+        float outlineWidth = v_msdfParams;
 
         float fillAlpha = clamp(screenDistance + 0.5, 0.0, 1.0);
         float strokeAlpha = clamp(screenDistance + outlineWidth + 0.5, 0.0, 1.0);

@@ -12116,6 +12116,7 @@ window.Laya = (function (exports) {
     SubmitBase.KEY_DRAWTEXTURE = 2;
     SubmitBase.KEY_VG = 3;
     SubmitBase.KEY_TRIANGLES = 4;
+    SubmitBase.KEY_TRIANGLES_MSDF = 5;
     SubmitBase.ID = 1;
     SubmitBase.RENDERBASE = new SubmitBase();
 
@@ -13498,7 +13499,7 @@ window.Laya = (function (exports) {
         onIBRealloc(buff) {
             this._ibU16Array = new Uint16Array(buff);
         }
-        addData(vertices, uvs, idx, matrix, abgr, uvrect = null, styleIndex = 0, outlineWidth = 0) {
+        addData(vertices, uvs, idx, matrix, abgr, uvrect = null) {
             let addVert = vertices.length / 2;
             this.expVBSize(addVert * MeshTexture.const_stride);
             var vertsz = vertices.length >> 1;
@@ -13548,9 +13549,6 @@ window.Laya = (function (exports) {
                 vbdata[f32pos + 6] = b;
                 vbdata[f32pos + 7] = a;
                 vbdata[f32pos + 8] = 0xff;
-                vbdata[f32pos + 9] = styleIndex;
-                vbdata[f32pos + 10] = outlineWidth;
-                vbdata[f32pos + 11] = 0.0;
                 f32pos += 12;
                 ci += 2;
             }
@@ -13575,6 +13573,96 @@ window.Laya = (function (exports) {
     }
     MeshTexture.const_stride = 48;
     MeshTexture.VertexDeclarition = null;
+
+    class MeshTextureMSDF extends Sprite2DGeometry {
+        static __init__() {
+            MeshTextureMSDF.VertexDeclarition = new VertexDeclaration(36, [
+                new VertexElement(0, VertexElementFormat.Vector4, 0),
+                new VertexElement(16, VertexElementFormat.NorUByte4, 1),
+                new VertexElement(20, VertexElementFormat.Byte4, 2),
+                new VertexElement(24, VertexElementFormat.NorUByte4, 3),
+                new VertexElement(28, VertexElementFormat.NorUByte4, 4),
+                new VertexElement(32, VertexElementFormat.Single, 5),
+            ]);
+        }
+        constructor() {
+            super(MeshTextureMSDF.const_stride, 4, 4);
+        }
+        onVBRealloc(buff) {
+            this._vbFloat32Array = new Float32Array(buff);
+            this._vbUInt32Array = new Uint32Array(buff);
+        }
+        onIBRealloc(buff) {
+            this._ibU16Array = new Uint16Array(buff);
+        }
+        addData(vertices, uvs, idx, matrix, abgr, fillColors, outlineColors, outlineParams, uvrect = null) {
+            const addVert = vertices.length / 2;
+            this.expVBSize(addVert * MeshTextureMSDF.const_stride);
+            const vertsz = vertices.length >> 1;
+            const startpos = this._vertNum * MeshTextureMSDF.const_stride;
+            let f32pos = startpos >> 2;
+            let u32pos = f32pos;
+            const vbFloatData = this._vbFloat32Array;
+            const vbUIntData = this._vbUInt32Array;
+            let ci = 0;
+            const m00 = matrix.a;
+            const m01 = matrix.b;
+            const m10 = matrix.c;
+            const m11 = matrix.d;
+            const tx = matrix.tx;
+            const ty = matrix.ty;
+            let uvminx = 0;
+            let uvminy = 0;
+            let uvu = 1;
+            let uvv = 1;
+            if (uvrect) {
+                uvminx = uvrect[0];
+                uvminy = uvrect[1];
+                uvu = uvrect[2];
+                uvv = uvrect[3];
+            }
+            let packedColor = typeof (abgr) == "number" ? abgr >>> 0 : 0xffffffff;
+            for (let i = 0; i < vertsz; i++) {
+                if (Array.isArray(abgr)) {
+                    packedColor = abgr[(ci / 8) | 0] >>> 0;
+                }
+                const x = vertices[ci];
+                const y = vertices[ci + 1];
+                vbFloatData[f32pos] = x * m00 + y * m10 + tx;
+                vbFloatData[f32pos + 1] = x * m01 + y * m11 + ty;
+                vbFloatData[f32pos + 2] = uvminx + uvs[ci] * uvu;
+                vbFloatData[f32pos + 3] = uvminy + uvs[ci + 1] * uvv;
+                vbUIntData[u32pos + 4] = packedColor;
+                vbUIntData[u32pos + 5] = MeshTextureMSDF.USE_TEX_FLAG;
+                vbUIntData[u32pos + 6] = fillColors[i];
+                vbUIntData[u32pos + 7] = outlineColors[i];
+                vbFloatData[f32pos + 8] = outlineParams[i];
+                f32pos += 9;
+                u32pos += 9;
+                ci += 2;
+            }
+            const vertN = this._vertNum;
+            const ibstart = this._indexNum;
+            this.expIBSize(idx.byteLength);
+            const indexBuffer = this._ibU16Array;
+            if (vertN > 0) {
+                for (let i = ibstart, si = 0, end = ibstart + idx.length; i < end; i++, si++) {
+                    indexBuffer[i] = idx[si] + vertN;
+                }
+            }
+            else {
+                indexBuffer.set(idx);
+            }
+            this._vertNum += vertsz;
+            this._indexNum += idx.length;
+        }
+        get vertexDeclarition() {
+            return MeshTextureMSDF.VertexDeclarition;
+        }
+    }
+    MeshTextureMSDF.const_stride = 36;
+    MeshTextureMSDF.VertexDeclarition = null;
+    MeshTextureMSDF.USE_TEX_FLAG = 1;
 
     class MeshVG extends Sprite2DGeometry {
         static __init__() {
@@ -13657,6 +13745,7 @@ window.Laya = (function (exports) {
             this._meshQuatTex = new MeshQuadTexture();
             this._meshVG = new MeshVG();
             this._meshTex = new MeshTexture();
+            this._meshTexMSDF = new MeshTextureMSDF();
             this._transedPoints = new Array(8);
             this._temp4Points = new Array(8);
             this._clipRect = Context.MAXCLIPRECT;
@@ -14533,12 +14622,17 @@ window.Laya = (function (exports) {
                 this._render2D.drawMesh(geo, material);
             }
         }
-        drawTrianglesAbs(tex, x, y, vertices, uvs, indices, matrix, alpha, blendMode, colorNum = 0xffffffff, styleIndex = 0, outlineWidth = 0) {
+        drawTrianglesAbs(tex, x, y, vertices, uvs, indices, matrix, alpha, blendMode, colorNum = 0xffffffff) {
             this._drawTriUseAbsMatrix = true;
-            this.drawTriangles(tex, x, y, vertices, uvs, indices, matrix, alpha, blendMode, colorNum, styleIndex, outlineWidth);
+            this.drawTriangles(tex, x, y, vertices, uvs, indices, matrix, alpha, blendMode, colorNum);
             this._drawTriUseAbsMatrix = false;
         }
-        drawTriangles(tex, x, y, vertices, uvs, indices, matrix, alpha, blendMode, colorNum = 0xffffffff, styleIndex = 0, outlineWidth = 0) {
+        drawTrianglesAbsMSDF(tex, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, matrix, alpha, blendMode, colorNum = 0xffffffff) {
+            this._drawTriUseAbsMatrix = true;
+            this.drawTrianglesMSDF(tex, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, matrix, alpha, blendMode, colorNum);
+            this._drawTriUseAbsMatrix = false;
+        }
+        drawTriangles(tex, x, y, vertices, uvs, indices, matrix, alpha, blendMode, colorNum = 0xffffffff) {
             if (alpha == null)
                 alpha = 1.0;
             if (!tex._getSource()) {
@@ -14592,10 +14686,74 @@ window.Laya = (function (exports) {
                     tmpMat$1.ty = matrix.ty + y;
                 }
                 Matrix.mul(tmpMat$1, this._curMat, tmpMat$1);
-                this._mesh.addData(vertices, uvs, indices, tmpMat$1 || this._curMat, rgba, null, styleIndex, outlineWidth);
+                this._mesh.addData(vertices, uvs, indices, tmpMat$1 || this._curMat, rgba, null);
             }
             else {
-                this._mesh.addData(vertices, uvs, indices, matrix, rgba, null, styleIndex, outlineWidth);
+                this._mesh.addData(vertices, uvs, indices, matrix, rgba, null);
+            }
+            this._curSubmit._numEle += indices.length;
+            if (blendMode) {
+                this.globalCompositeOperation = oldcomp;
+            }
+        }
+        drawTrianglesMSDF(tex, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, matrix, alpha, blendMode, colorNum = 0xffffffff) {
+            if (alpha == null)
+                alpha = 1.0;
+            if (!tex._getSource()) {
+                if (this.sprite) {
+                    ILaya.systemTimer.callLater(this, this._repaintSprite);
+                }
+                return;
+            }
+            let oldcomp = null;
+            if (blendMode) {
+                oldcomp = this.globalCompositeOperation;
+                this.globalCompositeOperation = blendMode;
+            }
+            const webGLImg = tex.bitmap;
+            const preKey = this._curSubmit._key;
+            const sameKey = preKey.submitType === SubmitBase.KEY_TRIANGLES_MSDF &&
+                preKey.other === webGLImg.id &&
+                preKey.blendShader == this._nBlendType &&
+                this._mesh.vertexNum + vertices.length / 2 < Context._MAXVERTNUM &&
+                this._curSubmit.material == this._material;
+            if (!sameKey) {
+                this._drawToRender2D(this._curSubmit);
+                this._mesh = this._meshTexMSDF;
+            }
+            if (!sameKey) {
+                const submit = this._curSubmit = SubmitBase.create(this, this._mesh, Value2D.create(exports.RenderSpriteData.Texture2D));
+                submit.shaderValue.textureHost = tex;
+                this.fillShaderValue(submit.shaderValue);
+                submit._key.submitType = SubmitBase.KEY_TRIANGLES_MSDF;
+                submit._key.other = webGLImg.id;
+                this._copyClipInfo(submit.shaderValue);
+                submit.clipInfoID = this._clipInfoID;
+            }
+            const nAlpha = this._alpha * alpha;
+            const rgba = Array.isArray(colorNum) ? colorNum.map(v => this._mixRGBandAlpha(v, nAlpha)) : this._mixRGBandAlpha(colorNum, nAlpha);
+            if (!this._drawTriUseAbsMatrix) {
+                if (!matrix) {
+                    tmpMat$1.a = 1;
+                    tmpMat$1.b = 0;
+                    tmpMat$1.c = 0;
+                    tmpMat$1.d = 1;
+                    tmpMat$1.tx = x;
+                    tmpMat$1.ty = y;
+                }
+                else {
+                    tmpMat$1.a = matrix.a;
+                    tmpMat$1.b = matrix.b;
+                    tmpMat$1.c = matrix.c;
+                    tmpMat$1.d = matrix.d;
+                    tmpMat$1.tx = matrix.tx + x;
+                    tmpMat$1.ty = matrix.ty + y;
+                }
+                Matrix.mul(tmpMat$1, this._curMat, tmpMat$1);
+                this._mesh.addData(vertices, uvs, indices, tmpMat$1 || this._curMat, rgba, fillColors, outlineColors, outlineParams);
+            }
+            else {
+                this._mesh.addData(vertices, uvs, indices, matrix, rgba, fillColors, outlineColors, outlineParams);
             }
             this._curSubmit._numEle += indices.length;
             if (blendMode) {
@@ -17182,7 +17340,7 @@ window.Laya = (function (exports) {
         constructor() {
             this.drawTriUseAbsMatrix = false;
         }
-        static create(texture, x, y, vertices, uvs, indices, matrix, alpha, color, blendMode, styleIndex = 0, outlineWidth = 0) {
+        static create(texture, x, y, vertices, uvs, indices, matrix, alpha, color, blendMode) {
             var cmd = Pool.getItemByClass("DrawTrianglesCmd", DrawTrianglesCmd);
             cmd.texture = texture;
             texture._addReference();
@@ -17195,8 +17353,6 @@ window.Laya = (function (exports) {
             cmd.alpha = alpha;
             cmd.color = color == null ? 0xffffffff : typeof (color) == 'string' ? ColorUtils.create(color).numColor : color;
             cmd.blendMode = blendMode;
-            cmd.styleIndex = styleIndex;
-            cmd.outlineWidth = outlineWidth;
             return cmd;
         }
         recover() {
@@ -17206,16 +17362,14 @@ window.Laya = (function (exports) {
             this.uvs = null;
             this.indices = null;
             this.matrix = null;
-            this.styleIndex = 0;
-            this.outlineWidth = 0;
             Pool.recover("DrawTrianglesCmd", this);
         }
         run(context, gx, gy) {
             if (this.drawTriUseAbsMatrix && this.matrix) {
-                context.drawTrianglesAbs(this.texture, this.x + gx, this.y + gy, this.vertices, this.uvs, this.indices, this.matrix, this.alpha, this.blendMode, this.color, this.styleIndex, this.outlineWidth);
+                context.drawTrianglesAbs(this.texture, this.x + gx, this.y + gy, this.vertices, this.uvs, this.indices, this.matrix, this.alpha, this.blendMode, this.color);
             }
             else {
-                context.drawTriangles(this.texture, this.x + gx, this.y + gy, this.vertices, this.uvs, this.indices, this.matrix, this.alpha, this.blendMode, this.color, this.styleIndex, this.outlineWidth);
+                context.drawTriangles(this.texture, this.x + gx, this.y + gy, this.vertices, this.uvs, this.indices, this.matrix, this.alpha, this.blendMode, this.color);
             }
         }
         get cmdID() {
@@ -17246,8 +17400,80 @@ window.Laya = (function (exports) {
         }
     }
     DrawTrianglesCmd.ID = "DrawTriangles";
-    DrawTrianglesCmd.STYLE_PAYLOAD_VERSION = 1;
     ClassUtils.regClass("DrawTrianglesCmd", DrawTrianglesCmd);
+
+    class DrawTrianglesMSDFCmd {
+        constructor() {
+            this.drawTriUseAbsMatrix = false;
+        }
+        static create(texture, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, matrix, alpha, color, blendMode) {
+            const cmd = Pool.getItemByClass("DrawTrianglesMSDFCmd", DrawTrianglesMSDFCmd);
+            cmd.texture = texture;
+            texture._addReference();
+            cmd.x = x;
+            cmd.y = y;
+            cmd.vertices = vertices;
+            cmd.uvs = uvs;
+            cmd.indices = indices;
+            cmd.fillColors = fillColors;
+            cmd.outlineColors = outlineColors;
+            cmd.outlineParams = outlineParams;
+            cmd.matrix = matrix;
+            cmd.alpha = alpha;
+            cmd.color = color == null ? 0xffffffff : typeof (color) == "string" ? ColorUtils.create(color).numColor : color;
+            cmd.blendMode = blendMode;
+            return cmd;
+        }
+        recover() {
+            this.texture && this.texture._removeReference();
+            this.texture = null;
+            this.vertices = null;
+            this.uvs = null;
+            this.indices = null;
+            this.fillColors = null;
+            this.outlineColors = null;
+            this.outlineParams = null;
+            this.matrix = null;
+            Pool.recover("DrawTrianglesMSDFCmd", this);
+        }
+        run(context, gx, gy) {
+            if (this.drawTriUseAbsMatrix && this.matrix) {
+                context.drawTrianglesAbsMSDF(this.texture, this.x + gx, this.y + gy, this.vertices, this.uvs, this.indices, this.fillColors, this.outlineColors, this.outlineParams, this.matrix, this.alpha, this.blendMode, this.color);
+            }
+            else {
+                context.drawTrianglesMSDF(this.texture, this.x + gx, this.y + gy, this.vertices, this.uvs, this.indices, this.fillColors, this.outlineColors, this.outlineParams, this.matrix, this.alpha, this.blendMode, this.color);
+            }
+        }
+        get cmdID() {
+            return DrawTrianglesMSDFCmd.ID;
+        }
+        getBoundPoints() {
+            const vert = this.vertices;
+            const vnum = vert.length;
+            if (vnum < 2) {
+                return [];
+            }
+            let minx = vert[0];
+            let miny = vert[1];
+            let maxx = minx;
+            let maxy = miny;
+            for (let i = 2; i < vnum;) {
+                const cx = vert[i++];
+                const cy = vert[i++];
+                if (minx > cx)
+                    minx = cx;
+                if (miny > cy)
+                    miny = cy;
+                if (maxx < cx)
+                    maxx = cx;
+                if (maxy < cy)
+                    maxy = cy;
+            }
+            return [minx, miny, maxx, miny, maxx, maxy, minx, maxy];
+        }
+    }
+    DrawTrianglesMSDFCmd.ID = "DrawTrianglesMSDF";
+    ClassUtils.regClass("DrawTrianglesMSDFCmd", DrawTrianglesMSDFCmd);
 
     class Draw9GridTextureCmd {
         constructor() {
@@ -17665,6 +17891,9 @@ window.Laya = (function (exports) {
                         addPointArrToRst(rst, cmd.getBoundPoints(), tMatrix);
                         break;
                     case DrawTrianglesCmd.ID:
+                        addPointArrToRst(rst, cmd.getBoundPoints(), tMatrix);
+                        break;
+                    case DrawTrianglesMSDFCmd.ID:
                         addPointArrToRst(rst, cmd.getBoundPoints(), tMatrix);
                         break;
                     case Draw9GridTextureCmd.ID:
@@ -18145,11 +18374,19 @@ window.Laya = (function (exports) {
         drawGeos(geo, elements) {
             return this.addCmd(DrawGeosCmd.create(geo, elements));
         }
-        drawTriangles(texture, x, y, vertices, uvs, indices, matrix = null, alpha = 1, color = null, blendMode = null, styleIndex = 0, outlineWidth = 0) {
-            return this.addCmd(DrawTrianglesCmd.create(texture, x, y, vertices, uvs, indices, matrix, alpha, color, blendMode, styleIndex, outlineWidth));
+        drawTriangles(texture, x, y, vertices, uvs, indices, matrix = null, alpha = 1, color = null, blendMode = null) {
+            return this.addCmd(DrawTrianglesCmd.create(texture, x, y, vertices, uvs, indices, matrix, alpha, color, blendMode));
         }
-        drawTrianglesAbs(texture, x, y, vertices, uvs, indices, matrix, alpha = 1, color = null, blendMode = null, styleIndex = 0, outlineWidth = 0) {
-            const cmd = DrawTrianglesCmd.create(texture, x, y, vertices, uvs, indices, matrix, alpha, color, blendMode, styleIndex, outlineWidth);
+        drawTrianglesAbs(texture, x, y, vertices, uvs, indices, matrix, alpha = 1, color = null, blendMode = null) {
+            const cmd = DrawTrianglesCmd.create(texture, x, y, vertices, uvs, indices, matrix, alpha, color, blendMode);
+            cmd.drawTriUseAbsMatrix = true;
+            return this.addCmd(cmd);
+        }
+        drawTrianglesMSDF(texture, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, matrix = null, alpha = 1, color = null, blendMode = null) {
+            return this.addCmd(DrawTrianglesMSDFCmd.create(texture, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, matrix, alpha, color, blendMode));
+        }
+        drawTrianglesAbsMSDF(texture, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, matrix, alpha = 1, color = null, blendMode = null) {
+            const cmd = DrawTrianglesMSDFCmd.create(texture, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, matrix, alpha, color, blendMode);
             cmd.drawTriUseAbsMatrix = true;
             return this.addCmd(cmd);
         }
@@ -28159,6 +28396,7 @@ window.Laya = (function (exports) {
             MeshQuadTexture.__int__();
             MeshVG.__init__();
             MeshTexture.__init__();
+            MeshTextureMSDF.__init__();
             Laya.render = Laya.createRender();
             exports.render = Laya.render;
             exports.stage.size(stageConfig.designWidth, stageConfig.designHeight);
@@ -36179,6 +36417,14 @@ ${uniformglsl}`;
     }
     BaseRenderNode2D._uniqueIDCounter = 0;
 
+    class System {
+        static changeDefinition(name, classObj) {
+            window.Laya[name] = classObj;
+            var str = name + "=classObj";
+            window['eval'](str);
+        }
+    }
+
     class VertexMesh2D {
         static getVertexDeclaration(vertexFlags, compatible = true) {
             let verDecs = [];
@@ -36388,13 +36634,26 @@ ${uniformglsl}`;
     }
     WebGLRTMgr.dict = {};
 
-    class System {
-        static changeDefinition(name, classObj) {
-            window.Laya[name] = classObj;
-            var str = name + "=classObj";
-            window['eval'](str);
+    class PerfTools {
+        static begin(block) {
+        }
+        static end(block) {
         }
     }
+    class PerformanceDefine {
+    }
+    window.PerformanceDefine = PerformanceDefine;
+    function PERF_BEGIN(block) {
+        PerfTools.begin(block);
+    }
+    window.PERF_BEGIN = PERF_BEGIN;
+    function PERF_END(block) {
+        PerfTools.end(block);
+    }
+    window.PERF_BEGIN = PERF_END;
+    function PERF_FRAMECLEAR() {
+    }
+    window.PERF_FRAMECLEAR = PERF_FRAMECLEAR;
 
     class Base64Tool {
         static init() {
@@ -37196,27 +37455,6 @@ ${uniformglsl}`;
     }
     WasmAdapter.Memory = typeof (WebAssembly) !== "undefined" ? WebAssembly.Memory : null;
 
-    class PerfTools {
-        static begin(block) {
-        }
-        static end(block) {
-        }
-    }
-    class PerformanceDefine {
-    }
-    window.PerformanceDefine = PerformanceDefine;
-    function PERF_BEGIN(block) {
-        PerfTools.begin(block);
-    }
-    window.PERF_BEGIN = PERF_BEGIN;
-    function PERF_END(block) {
-        PerfTools.end(block);
-    }
-    window.PERF_BEGIN = PERF_END;
-    function PERF_FRAMECLEAR() {
-    }
-    window.PERF_FRAMECLEAR = PERF_FRAMECLEAR;
-
     class CommandUniformMap {
         constructor(stateName) {
         }
@@ -37981,6 +38219,19 @@ ${uniformglsl}`;
                 default:
                     return Float32Array;
             }
+        }
+    }
+
+    class Sound extends EventDispatcher {
+        load(url) {
+        }
+        play(startTime = 0, loops = 0) {
+            return null;
+        }
+        get duration() {
+            return 0;
+        }
+        dispose() {
         }
     }
 
@@ -38859,19 +39110,6 @@ ${uniformglsl}`;
         }
     }
 
-    class Sound extends EventDispatcher {
-        load(url) {
-        }
-        play(startTime = 0, loops = 0) {
-            return null;
-        }
-        get duration() {
-            return 0;
-        }
-        dispose() {
-        }
-    }
-
     class WebGLCacheAsNormalCanvas {
         constructor(ctx, sp) {
             this.submitStartPos = 0;
@@ -39278,6 +39516,7 @@ ${uniformglsl}`;
     exports.DrawTextureCmd = DrawTextureCmd;
     exports.DrawTexturesCmd = DrawTexturesCmd;
     exports.DrawTrianglesCmd = DrawTrianglesCmd;
+    exports.DrawTrianglesMSDFCmd = DrawTrianglesMSDFCmd;
     exports.Earcut = Earcut;
     exports.EarcutNode = EarcutNode;
     exports.Ease = Ease;
@@ -39348,6 +39587,7 @@ ${uniformglsl}`;
     exports.Mesh2D = Mesh2D;
     exports.MeshQuadTexture = MeshQuadTexture;
     exports.MeshTexture = MeshTexture;
+    exports.MeshTextureMSDF = MeshTextureMSDF;
     exports.MeshVG = MeshVG;
     exports.Mouse = Mouse;
     exports.Node = Node;

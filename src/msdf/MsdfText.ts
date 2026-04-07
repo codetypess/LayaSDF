@@ -46,19 +46,21 @@ type MsdfDrawBatch = {
     vertices: Float32Array;
     uvs: Float32Array;
     indices: Uint16Array;
+    fillColors: Uint32Array;
+    outlineColors: Uint32Array;
+    outlineParams: Float32Array;
     textColor: Laya.Vector4;
     outlineColor: Laya.Vector4;
     outlineWidth: number;
 };
 
 type MsdfDrawBatchGroup = {
-    textColor: Laya.Vector4;
-    outlineColor: Laya.Vector4;
-    outlineWidth: number;
-    renderStyleKey: string;
     vertexChunks: Float32Array[];
     uvChunks: Float32Array[];
     indexChunks: Uint16Array[];
+    fillColorChunks: Uint32Array[];
+    outlineColorChunks: Uint32Array[];
+    outlineParamChunks: Float32Array[];
     vertexFloatCount: number;
     uvFloatCount: number;
     indexCount: number;
@@ -130,8 +132,6 @@ type MsdfRichTextLine = {
 
 const DEFAULT_TEXT_COLOR = new Laya.Vector4(1, 1, 1, 1);
 const DEFAULT_OUTLINE_COLOR = new Laya.Vector4(0, 0, 0, 1);
-const STYLE_TEXTURE_WIDTH = 256;
-const STYLE_TEXTURE_HEIGHT = 2;
 const ITALIC_SKEW_DEGREES = 12;
 const BOLD_SCALE_X = 1.04;
 const LARGE_DECORATION_SCALE_THRESHOLD = 1.75;
@@ -157,31 +157,14 @@ function createEmptyLayout(): MsdfLayout {
     };
 }
 
-function clamp01(value: number): number {
-    return Math.max(0, Math.min(1, value));
-}
-
-function colorKey(color: Laya.Vector4): string {
-    return `${color.x.toFixed(4)},${color.y.toFixed(4)},${color.z.toFixed(4)},${color.w.toFixed(4)}`;
-}
-
-function styleKey(textColor: Laya.Vector4, outlineColor: Laya.Vector4): string {
-    return `${colorKey(textColor)}|${colorKey(outlineColor)}`;
-}
-
-function renderStyleKey(textColor: Laya.Vector4, outlineColor: Laya.Vector4, outlineWidth: number): string {
-    return `${styleKey(textColor, outlineColor)}|${outlineWidth.toFixed(4)}`;
-}
-
 function createBatchGroup(batch: MsdfDrawBatch): MsdfDrawBatchGroup {
     return {
-        textColor: batch.textColor,
-        outlineColor: batch.outlineColor,
-        outlineWidth: batch.outlineWidth,
-        renderStyleKey: renderStyleKey(batch.textColor, batch.outlineColor, batch.outlineWidth),
         vertexChunks: [batch.vertices],
         uvChunks: [batch.uvs],
         indexChunks: [batch.indices],
+        fillColorChunks: [batch.fillColors],
+        outlineColorChunks: [batch.outlineColors],
+        outlineParamChunks: [batch.outlineParams],
         vertexFloatCount: batch.vertices.length,
         uvFloatCount: batch.uvs.length,
         indexCount: batch.indices.length,
@@ -195,27 +178,40 @@ function finalizeBatchGroup(group: MsdfDrawBatchGroup): MsdfDrawBatch {
             vertices: group.vertexChunks[0],
             uvs: group.uvChunks[0],
             indices: group.indexChunks[0],
-            textColor: group.textColor,
-            outlineColor: group.outlineColor,
-            outlineWidth: group.outlineWidth
+            fillColors: group.fillColorChunks[0],
+            outlineColors: group.outlineColorChunks[0],
+            outlineParams: group.outlineParamChunks[0],
+            textColor: DEFAULT_TEXT_COLOR,
+            outlineColor: DEFAULT_OUTLINE_COLOR,
+            outlineWidth: 0
         };
     }
 
     const vertices = new Float32Array(group.vertexFloatCount);
     const uvs = new Float32Array(group.uvFloatCount);
     const indices = new Uint16Array(group.indexCount);
+    const fillColors = new Uint32Array(group.vertexCount);
+    const outlineColors = new Uint32Array(group.vertexCount);
+    const outlineParams = new Float32Array(group.vertexCount);
     let vertexFloatOffset = 0;
     let uvFloatOffset = 0;
     let indexOffset = 0;
     let vertexBase = 0;
+    let styleOffset = 0;
 
     for (let i = 0; i < group.vertexChunks.length; i++) {
         const vertexChunk = group.vertexChunks[i];
         const uvChunk = group.uvChunks[i];
         const indexChunk = group.indexChunks[i];
+        const fillColorChunk = group.fillColorChunks[i];
+        const outlineColorChunk = group.outlineColorChunks[i];
+        const outlineParamChunk = group.outlineParamChunks[i];
 
         vertices.set(vertexChunk, vertexFloatOffset);
         uvs.set(uvChunk, uvFloatOffset);
+        fillColors.set(fillColorChunk, styleOffset);
+        outlineColors.set(outlineColorChunk, styleOffset);
+        outlineParams.set(outlineParamChunk, styleOffset);
 
         for (let j = 0; j < indexChunk.length; j++) {
             indices[indexOffset + j] = indexChunk[j] + vertexBase;
@@ -225,15 +221,19 @@ function finalizeBatchGroup(group: MsdfDrawBatchGroup): MsdfDrawBatch {
         uvFloatOffset += uvChunk.length;
         indexOffset += indexChunk.length;
         vertexBase += vertexChunk.length >> 1;
+        styleOffset += fillColorChunk.length;
     }
 
     return {
         vertices,
         uvs,
         indices,
-        textColor: group.textColor,
-        outlineColor: group.outlineColor,
-        outlineWidth: group.outlineWidth
+        fillColors,
+        outlineColors,
+        outlineParams,
+        textColor: DEFAULT_TEXT_COLOR,
+        outlineColor: DEFAULT_OUTLINE_COLOR,
+        outlineWidth: 0
     };
 }
 
@@ -246,10 +246,6 @@ function appendBatchGroup(groups: MsdfDrawBatch[], pendingGroup: MsdfDrawBatchGr
 }
 
 function canMergeBatchGroup(group: MsdfDrawBatchGroup, batch: MsdfDrawBatch): boolean {
-    if (group.renderStyleKey !== renderStyleKey(batch.textColor, batch.outlineColor, batch.outlineWidth)) {
-        return false;
-    }
-
     return group.vertexCount + (batch.vertices.length >> 1) <= 65535;
 }
 
@@ -257,6 +253,9 @@ function mergeBatchGroup(group: MsdfDrawBatchGroup, batch: MsdfDrawBatch): void 
     group.vertexChunks.push(batch.vertices);
     group.uvChunks.push(batch.uvs);
     group.indexChunks.push(batch.indices);
+    group.fillColorChunks.push(batch.fillColors);
+    group.outlineColorChunks.push(batch.outlineColors);
+    group.outlineParamChunks.push(batch.outlineParams);
     group.vertexFloatCount += batch.vertices.length;
     group.uvFloatCount += batch.uvs.length;
     group.indexCount += batch.indices.length;
@@ -275,6 +274,26 @@ function styleSkewExtra(height: number, style: MsdfRichTextStyle): number {
     return Math.tan(ITALIC_SKEW_DEGREES * Math.PI / 180) * height;
 }
 
+function packVertexColor(color: Laya.Vector4): number {
+    const r = Math.max(0, Math.min(255, Math.round(color.x * 255)));
+    const g = Math.max(0, Math.min(255, Math.round(color.y * 255)));
+    const b = Math.max(0, Math.min(255, Math.round(color.z * 255)));
+    const a = Math.max(0, Math.min(255, Math.round(color.w * 255)));
+    return (r | (g << 8) | (b << 16) | (a << 24)) >>> 0;
+}
+
+function createVertexColorArray(color: Laya.Vector4, vertexCount: number): Uint32Array {
+    const values = new Uint32Array(vertexCount);
+    values.fill(packVertexColor(color));
+    return values;
+}
+
+function createOutlineParamArray(outlineWidth: number, vertexCount: number): Float32Array {
+    const values = new Float32Array(vertexCount);
+    values.fill(outlineWidth);
+    return values;
+}
+
 function isHighSurrogate(code: number): boolean {
     return code >= 0xd800 && code <= 0xdbff;
 }
@@ -283,77 +302,19 @@ function isLowSurrogate(code: number): boolean {
     return code >= 0xdc00 && code <= 0xdfff;
 }
 
-function writePackedColor(target: Uint8Array, offset: number, color: Laya.Vector4): void {
-    target[offset] = Math.round(clamp01(color.x) * 255);
-    target[offset + 1] = Math.round(clamp01(color.y) * 255);
-    target[offset + 2] = Math.round(clamp01(color.z) * 255);
-    target[offset + 3] = Math.round(clamp01(color.w) * 255);
-}
-
-let cachedBatchStyleSupport: boolean | null = null;
-
-function supportsMsdfBatchStyle(): boolean {
-    if (cachedBatchStyleSupport != null) {
-        return cachedBatchStyleSupport;
-    }
-
-    cachedBatchStyleSupport = ((Laya as any).DrawTrianglesCmd?.STYLE_PAYLOAD_VERSION ?? 0) >= 1;
-    return cachedBatchStyleSupport;
-}
-
-class MsdfStyleRegistry {
-    readonly textureSize = new Laya.Vector2(STYLE_TEXTURE_WIDTH, STYLE_TEXTURE_HEIGHT);
-    readonly texture: Laya.Texture2D;
-
-    private readonly styleMap = new Map<string, number>();
-    private readonly pixels = new Uint8Array(STYLE_TEXTURE_WIDTH * STYLE_TEXTURE_HEIGHT * 4);
-    private styleCount = 0;
-
-    constructor() {
-        this.texture = new Laya.Texture2D(STYLE_TEXTURE_WIDTH, STYLE_TEXTURE_HEIGHT, Laya.TextureFormat.R8G8B8A8, false, false, false);
-        this.texture.filterMode = Laya.FilterMode.Point;
-        this.texture.setPixelsData(this.pixels, false, false);
-    }
-
-    register(textColor: Laya.Vector4, outlineColor: Laya.Vector4): number {
-        const key = styleKey(textColor, outlineColor);
-        const cached = this.styleMap.get(key);
-        if (cached != null) {
-            return cached;
-        }
-
-        if (this.styleCount >= STYLE_TEXTURE_WIDTH) {
-            throw new Error(`MSDF style registry is full. Max styles: ${STYLE_TEXTURE_WIDTH}`);
-        }
-
-        const styleIndex = this.styleCount++;
-        this.styleMap.set(key, styleIndex);
-
-        writePackedColor(this.pixels, styleIndex * 4, textColor);
-        writePackedColor(this.pixels, (STYLE_TEXTURE_WIDTH + styleIndex) * 4, outlineColor);
-        this.texture.setPixelsData(this.pixels, false, false);
-
-        return styleIndex;
-    }
-}
-
 class MsdfFontRenderState {
-    readonly styleRegistry = new MsdfStyleRegistry();
     readonly material: Laya.Material;
 
     constructor(font: MsdfBitmapFont) {
         this.material = new Laya.Material();
-        applyMaterialBase(this.material, font, this.styleRegistry, true);
+        applyMaterialBase(this.material, font);
     }
 }
 
-function applyMaterialBase(material: Laya.Material, font: MsdfBitmapFont, styleRegistry: MsdfStyleRegistry, useStyleTexture: boolean): void {
+function applyMaterialBase(material: Laya.Material, font: MsdfBitmapFont): void {
     material.setShaderName("MsdfTextShader");
     material.setVector2("u_AtlasSize", new Laya.Vector2(font.atlasWidth, font.atlasHeight));
     material.setFloat("u_DistanceRange", font.distanceRange);
-    material.setTexture("u_StyleTexture", styleRegistry.texture);
-    material.setVector2("u_StyleTextureSize", styleRegistry.textureSize);
-    material.setFloat("u_UseStyleTexture", useStyleTexture ? 1 : 0);
 }
 
 function kerningKey(first: number, second: number): number {
@@ -720,7 +681,6 @@ export class MsdfBitmapFont {
 
 export class MsdfTextSprite extends Laya.Sprite {
     private materialInstance: Laya.Material;
-    private readonly useBatchStyleData: boolean;
 
     private _text: string;
     private _fontSize: number;
@@ -740,7 +700,6 @@ export class MsdfTextSprite extends Laya.Sprite {
     private _contentWidth = 0;
     private _contentHeight = 0;
     private _drawBatches: MsdfDrawBatch[] = [];
-    private _multiStyleFallbackReported = false;
 
     constructor(private font: MsdfBitmapFont, options: MsdfTextOptions = {}) {
         super();
@@ -754,11 +713,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         this._outlineWidth = options.outlineWidth ?? 0;
         this._underline = !!options.underline;
         this._strikethrough = !!options.strikethrough;
-        this.useBatchStyleData = supportsMsdfBatchStyle();
-
-        this.materialInstance = this.useBatchStyleData
-            ? this.font.renderState.material
-            : new Laya.Material();
+        this.materialInstance = this.font.renderState.material;
         this.material = this.materialInstance;
         this.mouseThrough = true;
 
@@ -839,30 +794,21 @@ export class MsdfTextSprite extends Laya.Sprite {
     set textColor(value: Laya.Vector4) {
         this._textColor = value;
         if (!this._usesRuns) {
-            if (this._drawBatches[0]) {
-                this._drawBatches[0].textColor = value;
-            }
-            this.redraw();
+            this.refresh();
         }
     }
 
     set outlineColor(value: Laya.Vector4) {
         this._outlineColor = value;
         if (!this._usesRuns) {
-            if (this._drawBatches[0]) {
-                this._drawBatches[0].outlineColor = value;
-            }
-            this.redraw();
+            this.refresh();
         }
     }
 
     set outlineWidth(value: number) {
         this._outlineWidth = value;
         if (!this._usesRuns) {
-            if (this._drawBatches[0]) {
-                this._drawBatches[0].outlineWidth = value;
-            }
-            this.redraw();
+            this.refresh();
         }
     }
 
@@ -889,10 +835,8 @@ export class MsdfTextSprite extends Laya.Sprite {
 
     resetFont(font: MsdfBitmapFont): void {
         this.font = font;
-        if (this.useBatchStyleData) {
-            this.materialInstance = this.font.renderState.material;
-            this.material = this.materialInstance;
-        }
+        this.materialInstance = this.font.renderState.material;
+        this.material = this.materialInstance;
         this.refresh();
     }
 
@@ -919,6 +863,9 @@ export class MsdfTextSprite extends Laya.Sprite {
                 vertices: this._layout.vertices,
                 uvs: this._layout.uvs,
                 indices: this._layout.indices,
+                fillColors: createVertexColorArray(this._textColor, this._layout.vertices.length >> 1),
+                outlineColors: createVertexColorArray(this._outlineColor, this._layout.vertices.length >> 1),
+                outlineParams: createOutlineParamArray(this._outlineWidth, this._layout.vertices.length >> 1),
                 textColor: this._textColor,
                 outlineColor: this._outlineColor,
                 outlineWidth: this._outlineWidth
@@ -976,21 +923,12 @@ export class MsdfTextSprite extends Laya.Sprite {
         this.redraw();
     }
 
-    private syncMaterial(batch: MsdfDrawBatch | null = this._drawBatches[0] ?? null): void {
+    private syncMaterial(): void {
         const renderState = this.font.renderState;
-
-        if (this.useBatchStyleData) {
-            if (this.materialInstance !== renderState.material) {
-                this.materialInstance = renderState.material;
-                this.material = this.materialInstance;
-            }
-            return;
+        if (this.materialInstance !== renderState.material) {
+            this.materialInstance = renderState.material;
+            this.material = this.materialInstance;
         }
-
-        applyMaterialBase(this.materialInstance, this.font, renderState.styleRegistry, false);
-        this.materialInstance.setVector4("u_TextColor", batch?.textColor ?? this._textColor);
-        this.materialInstance.setVector4("u_OutlineColor", batch?.outlineColor ?? this._outlineColor);
-        this.materialInstance.setFloat("u_OutlineWidth", batch?.outlineWidth ?? this._outlineWidth);
     }
 
     private redraw(): void {
@@ -1001,49 +939,21 @@ export class MsdfTextSprite extends Laya.Sprite {
             return;
         }
 
-        const firstBatch = this._drawBatches[0];
-        this.syncMaterial(firstBatch);
-
-        if (!this.useBatchStyleData) {
-            const expectedStyle = renderStyleKey(firstBatch.textColor, firstBatch.outlineColor, firstBatch.outlineWidth);
-            const hasMultiStyle = this._drawBatches.some((batch, index) =>
-                index > 0 && renderStyleKey(batch.textColor, batch.outlineColor, batch.outlineWidth) !== expectedStyle);
-
-            if (hasMultiStyle) {
-                this.reportMultiStyleFallback();
-            }
-        }
+        this.syncMaterial();
 
         for (const batch of this._drawBatches) {
-            if (this.useBatchStyleData) {
-                const styleIndex = this.font.renderState.styleRegistry.register(batch.textColor, batch.outlineColor);
-                this.graphics.drawTriangles(
-                    this.font.texture,
-                    0,
-                    0,
-                    batch.vertices,
-                    batch.uvs,
-                    batch.indices,
-                    null,
-                    1,
-                    null,
-                    null,
-                    styleIndex,
-                    batch.outlineWidth
-                );
-            } else {
-                this.graphics.drawTriangles(this.font.texture, 0, 0, batch.vertices, batch.uvs, batch.indices);
-            }
+            this.graphics.drawTrianglesMSDF(
+                this.font.texture,
+                0,
+                0,
+                batch.vertices,
+                batch.uvs,
+                batch.indices,
+                batch.fillColors,
+                batch.outlineColors,
+                batch.outlineParams
+            );
         }
-    }
-
-    private reportMultiStyleFallback(): void {
-        if (this._multiStyleFallbackReported) {
-            return;
-        }
-
-        this._multiStyleFallbackReported = true;
-        console.error("[MsdfTextSprite] rich text with multiple styles requires DrawTriangles STYLE_PAYLOAD_VERSION >= 1; rendering with the first style only.");
     }
 
     private layoutRuns(): MsdfRichTextLine[] {
@@ -1480,6 +1390,9 @@ export class MsdfTextSprite extends Laya.Sprite {
             vertices,
             uvs: layout.uvs,
             indices: layout.indices,
+            fillColors: createVertexColorArray(style.textColor, vertices.length >> 1),
+            outlineColors: createVertexColorArray(style.outlineColor, vertices.length >> 1),
+            outlineParams: createOutlineParamArray(style.outlineWidth, vertices.length >> 1),
             textColor: style.textColor,
             outlineColor: style.outlineColor,
             outlineWidth: style.outlineWidth

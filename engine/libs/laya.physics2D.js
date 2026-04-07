@@ -1,6 +1,17 @@
 (function (exports, Laya) {
     'use strict';
 
+    exports.PhysicsShape = void 0;
+    (function (PhysicsShape) {
+        PhysicsShape[PhysicsShape["BoxShape"] = 0] = "BoxShape";
+        PhysicsShape[PhysicsShape["CircleShape"] = 1] = "CircleShape";
+        PhysicsShape[PhysicsShape["PolygonShape"] = 2] = "PolygonShape";
+        PhysicsShape[PhysicsShape["ChainShape"] = 3] = "ChainShape";
+        PhysicsShape[PhysicsShape["EdgeShape"] = 4] = "EdgeShape";
+    })(exports.PhysicsShape || (exports.PhysicsShape = {}));
+    class FixtureBox2DDef {
+    }
+
     class Physics2DOption {
     }
     Physics2DOption.allowSleeping = false;
@@ -210,202 +221,6 @@
         }
     }
     Laya.Laya.addInitCallback(() => Physics2D.I.enable());
-
-    class JointBase extends Laya.Component {
-        get joint() {
-            if (!this._joint)
-                this._createJoint();
-            return this._joint;
-        }
-        constructor() {
-            super();
-            this._factory = Physics2D.I._factory;
-            this._singleton = false;
-        }
-        getBodyAnchor(body, anchorx, anchory) {
-            Laya.Point.TEMP.setTo(anchorx, anchory);
-            let node = body.owner;
-            if (node) {
-                if (node.transform) {
-                    node.transform.transformPointN(Laya.Point.TEMP);
-                }
-                else {
-                    Laya.Point.TEMP.x *= node.scaleX;
-                    Laya.Point.TEMP.y *= node.scaleY;
-                }
-            }
-            return Laya.Point.TEMP;
-        }
-        _onEnable() {
-            this._createJoint();
-        }
-        _onAwake() {
-        }
-        _createJoint() {
-        }
-        _onDisable() {
-            if (this._joint && this._factory.getJoint_userData(this._joint) && !this._factory.getJoint_userData_destroy(this._joint)) {
-                Physics2D.I._factory.removeJoint(this._joint);
-            }
-            this._joint = null;
-        }
-    }
-
-    exports.PhysicsShape = void 0;
-    (function (PhysicsShape) {
-        PhysicsShape[PhysicsShape["BoxShape"] = 0] = "BoxShape";
-        PhysicsShape[PhysicsShape["CircleShape"] = 1] = "CircleShape";
-        PhysicsShape[PhysicsShape["PolygonShape"] = 2] = "PolygonShape";
-        PhysicsShape[PhysicsShape["ChainShape"] = 3] = "ChainShape";
-        PhysicsShape[PhysicsShape["EdgeShape"] = 4] = "EdgeShape";
-    })(exports.PhysicsShape || (exports.PhysicsShape = {}));
-    class FixtureBox2DDef {
-    }
-
-    class ColliderBase extends Laya.Component {
-        get scaleX() {
-            return this.owner.globalScaleX;
-        }
-        get scaleY() {
-            return this.owner.globalScaleY;
-        }
-        get pivotoffx() {
-            return this._x - this.owner.pivotX;
-        }
-        get pivotoffy() {
-            return this._y - this.owner.pivotY;
-        }
-        get x() {
-            return this._x;
-        }
-        set x(value) {
-            if (this._x == value)
-                return;
-            this._x = value;
-            this._needupdataShapeAttribute();
-        }
-        get y() {
-            return this._y;
-        }
-        set y(value) {
-            if (this._y == value)
-                return;
-            this._y = value;
-            this._needupdataShapeAttribute();
-        }
-        get isSensor() {
-            return this._isSensor;
-        }
-        set isSensor(value) {
-            if (this._isSensor == value)
-                return;
-            this._isSensor = value;
-            this._needupdataShapeAttribute();
-        }
-        get density() {
-            return this._density;
-        }
-        set density(value) {
-            if (this._density == value)
-                return;
-            this._density = value;
-            this._needupdataShapeAttribute();
-        }
-        get friction() {
-            return this._friction;
-        }
-        set friction(value) {
-            if (this._friction == value)
-                return;
-            this._friction = value;
-            this._needupdataShapeAttribute();
-        }
-        get restitution() {
-            return this._restitution;
-        }
-        set restitution(value) {
-            if (this._restitution == value)
-                return;
-            this._restitution = value;
-            this._needupdataShapeAttribute();
-        }
-        constructor() {
-            super();
-            this._isSensor = false;
-            this._density = 10;
-            this._friction = 0.2;
-            this._restitution = 0;
-            this._x = 0;
-            this._y = 0;
-            this._singleton = false;
-        }
-        _setShapeData(shape) {
-            throw ("ColliderBase: must override it.");
-        }
-        _createfixture() {
-            let factory = Physics2D.I._factory;
-            var body = this.rigidBody.body;
-            var def = ColliderBase.TempDef;
-            def.density = this.density;
-            def.friction = this.friction;
-            def.isSensor = this.isSensor;
-            def.restitution = this.restitution;
-            def.shape = this._physicShape;
-            let fixtureDef = factory.createFixtureDef(def);
-            this._setShapeData(fixtureDef._shape);
-            this._fixture = factory.createfixture(body, fixtureDef);
-        }
-        resetFixtureData() {
-            var def = ColliderBase.TempDef;
-            def.density = this.density;
-            def.friction = this.friction;
-            def.isSensor = this.isSensor;
-            def.restitution = this.restitution;
-            Physics2D.I._factory.resetFixtureData(this._fixture, def);
-            this._setShapeData(this._fixture.shape);
-        }
-        _onEnable() {
-            if (this.owner.getComponent(RigidBody)) {
-                this.rigidBody = this.owner.getComponent(RigidBody);
-                this._needupdataShapeAttribute();
-            }
-        }
-        _onAwake() {
-            if (this.owner.getComponent(RigidBody)) {
-                this.rigidBody = this.owner.getComponent(RigidBody);
-                this._needupdataShapeAttribute();
-            }
-        }
-        _needupdataShapeAttribute() {
-            if (!this.rigidBody) {
-                return;
-            }
-            this.rigidBody._needrefeshShape();
-        }
-        _refresh() {
-            if (!this.enabled) {
-                return;
-            }
-            let factory = Physics2D.I._factory;
-            if (!this._fixture)
-                this._createfixture();
-            else
-                this.resetFixtureData();
-            factory.set_fixtureDef_GroupIndex(this._fixture, this.rigidBody.group);
-            factory.set_fixtureDef_CategoryBits(this._fixture, this.rigidBody.category);
-            factory.set_fixtureDef_maskBits(this._fixture, this.rigidBody.mask);
-            factory.set_fixture_collider(this._fixture, this);
-        }
-        _onDisable() {
-            let factory = Physics2D.I._factory;
-            if (this._fixture && this.rigidBody._getOriBody()) {
-                factory.rigidBody_DestroyFixture(this.rigidBody.body, this._fixture);
-            }
-            this._fixture = null;
-            this.rigidBody = null;
-        }
-    }
-    ColliderBase.TempDef = new FixtureBox2DDef();
 
     class RigidBody2DInfo {
         constructor() {
@@ -764,6 +579,351 @@
         }
     }
     RigidBody.changeFlag = Laya.Sprite.Sprite_GlobalDeltaFlage_Position_X | Laya.Sprite.Sprite_GlobalDeltaFlage_Position_Y | Laya.Sprite.Sprite_GlobalDeltaFlage_Rotation | Laya.Sprite.Sprite_GlobalDeltaFlage_Scale_X | Laya.Sprite.Sprite_GlobalDeltaFlage_Scale_Y;
+
+    class ColliderBase extends Laya.Component {
+        get scaleX() {
+            return this.owner.globalScaleX;
+        }
+        get scaleY() {
+            return this.owner.globalScaleY;
+        }
+        get pivotoffx() {
+            return this._x - this.owner.pivotX;
+        }
+        get pivotoffy() {
+            return this._y - this.owner.pivotY;
+        }
+        get x() {
+            return this._x;
+        }
+        set x(value) {
+            if (this._x == value)
+                return;
+            this._x = value;
+            this._needupdataShapeAttribute();
+        }
+        get y() {
+            return this._y;
+        }
+        set y(value) {
+            if (this._y == value)
+                return;
+            this._y = value;
+            this._needupdataShapeAttribute();
+        }
+        get isSensor() {
+            return this._isSensor;
+        }
+        set isSensor(value) {
+            if (this._isSensor == value)
+                return;
+            this._isSensor = value;
+            this._needupdataShapeAttribute();
+        }
+        get density() {
+            return this._density;
+        }
+        set density(value) {
+            if (this._density == value)
+                return;
+            this._density = value;
+            this._needupdataShapeAttribute();
+        }
+        get friction() {
+            return this._friction;
+        }
+        set friction(value) {
+            if (this._friction == value)
+                return;
+            this._friction = value;
+            this._needupdataShapeAttribute();
+        }
+        get restitution() {
+            return this._restitution;
+        }
+        set restitution(value) {
+            if (this._restitution == value)
+                return;
+            this._restitution = value;
+            this._needupdataShapeAttribute();
+        }
+        constructor() {
+            super();
+            this._isSensor = false;
+            this._density = 10;
+            this._friction = 0.2;
+            this._restitution = 0;
+            this._x = 0;
+            this._y = 0;
+            this._singleton = false;
+        }
+        _setShapeData(shape) {
+            throw ("ColliderBase: must override it.");
+        }
+        _createfixture() {
+            let factory = Physics2D.I._factory;
+            var body = this.rigidBody.body;
+            var def = ColliderBase.TempDef;
+            def.density = this.density;
+            def.friction = this.friction;
+            def.isSensor = this.isSensor;
+            def.restitution = this.restitution;
+            def.shape = this._physicShape;
+            let fixtureDef = factory.createFixtureDef(def);
+            this._setShapeData(fixtureDef._shape);
+            this._fixture = factory.createfixture(body, fixtureDef);
+        }
+        resetFixtureData() {
+            var def = ColliderBase.TempDef;
+            def.density = this.density;
+            def.friction = this.friction;
+            def.isSensor = this.isSensor;
+            def.restitution = this.restitution;
+            Physics2D.I._factory.resetFixtureData(this._fixture, def);
+            this._setShapeData(this._fixture.shape);
+        }
+        _onEnable() {
+            if (this.owner.getComponent(RigidBody)) {
+                this.rigidBody = this.owner.getComponent(RigidBody);
+                this._needupdataShapeAttribute();
+            }
+        }
+        _onAwake() {
+            if (this.owner.getComponent(RigidBody)) {
+                this.rigidBody = this.owner.getComponent(RigidBody);
+                this._needupdataShapeAttribute();
+            }
+        }
+        _needupdataShapeAttribute() {
+            if (!this.rigidBody) {
+                return;
+            }
+            this.rigidBody._needrefeshShape();
+        }
+        _refresh() {
+            if (!this.enabled) {
+                return;
+            }
+            let factory = Physics2D.I._factory;
+            if (!this._fixture)
+                this._createfixture();
+            else
+                this.resetFixtureData();
+            factory.set_fixtureDef_GroupIndex(this._fixture, this.rigidBody.group);
+            factory.set_fixtureDef_CategoryBits(this._fixture, this.rigidBody.category);
+            factory.set_fixtureDef_maskBits(this._fixture, this.rigidBody.mask);
+            factory.set_fixture_collider(this._fixture, this);
+        }
+        _onDisable() {
+            let factory = Physics2D.I._factory;
+            if (this._fixture && this.rigidBody._getOriBody()) {
+                factory.rigidBody_DestroyFixture(this.rigidBody.body, this._fixture);
+            }
+            this._fixture = null;
+            this.rigidBody = null;
+        }
+    }
+    ColliderBase.TempDef = new FixtureBox2DDef();
+
+    class BoxCollider extends ColliderBase {
+        get width() {
+            return this._width;
+        }
+        set width(value) {
+            if (value <= 0)
+                throw "BoxCollider size cannot be less than 0";
+            if (this._width == value)
+                return;
+            this._width = value;
+            this._needupdataShapeAttribute();
+        }
+        get height() {
+            return this._height;
+        }
+        set height(value) {
+            if (value <= 0)
+                throw "BoxCollider size cannot be less than 0";
+            if (this._height == value)
+                return;
+            this._height = value;
+            this._needupdataShapeAttribute();
+        }
+        constructor() {
+            super();
+            this._width = 100;
+            this._height = 100;
+            this._physicShape = exports.PhysicsShape.BoxShape;
+        }
+        _setShapeData(shape) {
+            let helfW = this._width * 0.5;
+            let helfH = this._height * 0.5;
+            var center = {
+                x: helfW + this.pivotoffx,
+                y: helfH + this.pivotoffy
+            };
+            Physics2D.I._factory.set_collider_SetAsBox(shape, helfW, helfH, center, Math.abs(this.scaleX), Math.abs(this.scaleY));
+        }
+    }
+
+    class ChainCollider extends ColliderBase {
+        get points() {
+            return this._points;
+        }
+        set points(value) {
+            if (!value)
+                throw "ChainCollider points cannot be empty";
+            this._points = value;
+            var arr = this._points.split(",");
+            let length = arr.length;
+            this._datas = [];
+            for (var i = 0, n = length; i < n; i++) {
+                this._datas.push(parseInt(arr[i]));
+            }
+            this._needupdataShapeAttribute();
+        }
+        get datas() {
+            return this._datas;
+        }
+        set datas(value) {
+            if (!value)
+                throw "ChainCollider datas cannot be empty";
+            this._datas = value;
+            this._needupdataShapeAttribute();
+        }
+        get loop() {
+            return this._loop;
+        }
+        set loop(value) {
+            if (this._loop == value)
+                return;
+            this._loop = value;
+            this._needupdataShapeAttribute();
+        }
+        constructor() {
+            super();
+            this._points = "0,0,100,0";
+            this._datas = [];
+            this._loop = false;
+            this._physicShape = exports.PhysicsShape.ChainShape;
+        }
+        _setShapeData(shape) {
+            var len = this._datas.length;
+            if (len % 2 == 1)
+                throw "ChainCollider datas lenth must a multiplier of 2";
+            Physics2D.I._factory.set_ChainShape_data(shape, this.pivotoffx, this.pivotoffy, this._datas, this._loop, this.scaleX, this.scaleY);
+        }
+        onAdded() {
+            super.onAdded();
+            if (this._datas.length == 0) {
+                let sp = this.owner;
+                this._datas.push(0, 0, sp.width, 0, 0, sp.height, sp.width, sp.height);
+            }
+        }
+    }
+
+    class CircleCollider extends ColliderBase {
+        get radius() {
+            return this._radius;
+        }
+        set radius(value) {
+            if (value <= 0)
+                throw "CircleCollider radius cannot be less than 0";
+            if (this._radius == value)
+                return;
+            this._radius = value;
+            this._needupdataShapeAttribute();
+        }
+        constructor() {
+            super();
+            this._radius = 50;
+            this._physicShape = exports.PhysicsShape.CircleShape;
+        }
+        _setShapeData(shape) {
+            var scale = Math.max(Math.abs(this.scaleX), Math.abs(this.scaleY));
+            let radius = this.radius;
+            Physics2D.I._factory.set_CircleShape_radius(shape, radius, scale);
+            Physics2D.I._factory.set_CircleShape_pos(shape, this.x, this.y, scale);
+        }
+    }
+
+    class EdgeCollider extends ColliderBase {
+        get points() {
+            return this._points;
+        }
+        set points(value) {
+            if (!value)
+                throw "EdgeCollider points cannot be empty";
+            this._points = value;
+            var arr = this._points.split(",");
+            let length = arr.length;
+            this._datas = [];
+            for (var i = 0, n = length; i < n; i++) {
+                this._datas.push(parseInt(arr[i]));
+            }
+            this._needupdataShapeAttribute();
+        }
+        get datas() {
+            return this._datas;
+        }
+        set datas(value) {
+            if (!value)
+                throw "EdgeCollider points cannot be empty";
+            this._datas = value;
+            this._needupdataShapeAttribute();
+        }
+        constructor() {
+            super();
+            this._points = "0,0,100,0";
+            this._datas = [0, 0, 100, 0];
+            this._physicShape = exports.PhysicsShape.EdgeShape;
+        }
+        _setShapeData(shape) {
+            var len = this._datas.length;
+            if (len % 2 == 1)
+                throw "EdgeCollider points lenth must a multiplier of 2";
+            Physics2D.I._factory.set_EdgeShape_data(shape, this.pivotoffx, this.pivotoffy, this._datas, this.scaleX, this.scaleY);
+        }
+    }
+
+    class JointBase extends Laya.Component {
+        get joint() {
+            if (!this._joint)
+                this._createJoint();
+            return this._joint;
+        }
+        constructor() {
+            super();
+            this._factory = Physics2D.I._factory;
+            this._singleton = false;
+        }
+        getBodyAnchor(body, anchorx, anchory) {
+            Laya.Point.TEMP.setTo(anchorx, anchory);
+            let node = body.owner;
+            if (node) {
+                if (node.transform) {
+                    node.transform.transformPointN(Laya.Point.TEMP);
+                }
+                else {
+                    Laya.Point.TEMP.x *= node.scaleX;
+                    Laya.Point.TEMP.y *= node.scaleY;
+                }
+            }
+            return Laya.Point.TEMP;
+        }
+        _onEnable() {
+            this._createJoint();
+        }
+        _onAwake() {
+        }
+        _createJoint() {
+        }
+        _onDisable() {
+            if (this._joint && this._factory.getJoint_userData(this._joint) && !this._factory.getJoint_userData_destroy(this._joint)) {
+                Physics2D.I._factory.removeJoint(this._joint);
+            }
+            this._joint = null;
+        }
+    }
 
     class physics2D_DistancJointDef {
         constructor() {
@@ -1499,166 +1659,6 @@
                 def.dampingRatio = this._dampingRatio;
                 this._joint = this._factory.create_WheelJoint(def);
             }
-        }
-    }
-
-    class BoxCollider extends ColliderBase {
-        get width() {
-            return this._width;
-        }
-        set width(value) {
-            if (value <= 0)
-                throw "BoxCollider size cannot be less than 0";
-            if (this._width == value)
-                return;
-            this._width = value;
-            this._needupdataShapeAttribute();
-        }
-        get height() {
-            return this._height;
-        }
-        set height(value) {
-            if (value <= 0)
-                throw "BoxCollider size cannot be less than 0";
-            if (this._height == value)
-                return;
-            this._height = value;
-            this._needupdataShapeAttribute();
-        }
-        constructor() {
-            super();
-            this._width = 100;
-            this._height = 100;
-            this._physicShape = exports.PhysicsShape.BoxShape;
-        }
-        _setShapeData(shape) {
-            let helfW = this._width * 0.5;
-            let helfH = this._height * 0.5;
-            var center = {
-                x: helfW + this.pivotoffx,
-                y: helfH + this.pivotoffy
-            };
-            Physics2D.I._factory.set_collider_SetAsBox(shape, helfW, helfH, center, Math.abs(this.scaleX), Math.abs(this.scaleY));
-        }
-    }
-
-    class ChainCollider extends ColliderBase {
-        get points() {
-            return this._points;
-        }
-        set points(value) {
-            if (!value)
-                throw "ChainCollider points cannot be empty";
-            this._points = value;
-            var arr = this._points.split(",");
-            let length = arr.length;
-            this._datas = [];
-            for (var i = 0, n = length; i < n; i++) {
-                this._datas.push(parseInt(arr[i]));
-            }
-            this._needupdataShapeAttribute();
-        }
-        get datas() {
-            return this._datas;
-        }
-        set datas(value) {
-            if (!value)
-                throw "ChainCollider datas cannot be empty";
-            this._datas = value;
-            this._needupdataShapeAttribute();
-        }
-        get loop() {
-            return this._loop;
-        }
-        set loop(value) {
-            if (this._loop == value)
-                return;
-            this._loop = value;
-            this._needupdataShapeAttribute();
-        }
-        constructor() {
-            super();
-            this._points = "0,0,100,0";
-            this._datas = [];
-            this._loop = false;
-            this._physicShape = exports.PhysicsShape.ChainShape;
-        }
-        _setShapeData(shape) {
-            var len = this._datas.length;
-            if (len % 2 == 1)
-                throw "ChainCollider datas lenth must a multiplier of 2";
-            Physics2D.I._factory.set_ChainShape_data(shape, this.pivotoffx, this.pivotoffy, this._datas, this._loop, this.scaleX, this.scaleY);
-        }
-        onAdded() {
-            super.onAdded();
-            if (this._datas.length == 0) {
-                let sp = this.owner;
-                this._datas.push(0, 0, sp.width, 0, 0, sp.height, sp.width, sp.height);
-            }
-        }
-    }
-
-    class CircleCollider extends ColliderBase {
-        get radius() {
-            return this._radius;
-        }
-        set radius(value) {
-            if (value <= 0)
-                throw "CircleCollider radius cannot be less than 0";
-            if (this._radius == value)
-                return;
-            this._radius = value;
-            this._needupdataShapeAttribute();
-        }
-        constructor() {
-            super();
-            this._radius = 50;
-            this._physicShape = exports.PhysicsShape.CircleShape;
-        }
-        _setShapeData(shape) {
-            var scale = Math.max(Math.abs(this.scaleX), Math.abs(this.scaleY));
-            let radius = this.radius;
-            Physics2D.I._factory.set_CircleShape_radius(shape, radius, scale);
-            Physics2D.I._factory.set_CircleShape_pos(shape, this.x, this.y, scale);
-        }
-    }
-
-    class EdgeCollider extends ColliderBase {
-        get points() {
-            return this._points;
-        }
-        set points(value) {
-            if (!value)
-                throw "EdgeCollider points cannot be empty";
-            this._points = value;
-            var arr = this._points.split(",");
-            let length = arr.length;
-            this._datas = [];
-            for (var i = 0, n = length; i < n; i++) {
-                this._datas.push(parseInt(arr[i]));
-            }
-            this._needupdataShapeAttribute();
-        }
-        get datas() {
-            return this._datas;
-        }
-        set datas(value) {
-            if (!value)
-                throw "EdgeCollider points cannot be empty";
-            this._datas = value;
-            this._needupdataShapeAttribute();
-        }
-        constructor() {
-            super();
-            this._points = "0,0,100,0";
-            this._datas = [0, 0, 100, 0];
-            this._physicShape = exports.PhysicsShape.EdgeShape;
-        }
-        _setShapeData(shape) {
-            var len = this._datas.length;
-            if (len % 2 == 1)
-                throw "EdgeCollider points lenth must a multiplier of 2";
-            Physics2D.I._factory.set_EdgeShape_data(shape, this.pivotoffx, this.pivotoffy, this._datas, this.scaleX, this.scaleY);
         }
     }
 
