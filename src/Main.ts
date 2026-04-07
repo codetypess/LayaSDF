@@ -41,7 +41,8 @@ export class Main extends Laya.Script {
             leftY += fontSize + 20;
         }
 
-        const wrapped = new MsdfLabel("MSDFLabel 组件支持基础对齐、描边和自动换行。");
+        const wrapped = new MsdfLabel("MSDFLabel 现已支持 <font color=\"#f9e38f\" size=\"34\">HTML 富文本</font>、<i>斜体</i>、<u>下划线</u>、<strike>删除线</strike> 和自动换行。");
+        wrapped.html = true;
         wrapped.fontSize = 28;
         wrapped.color = "#dbe8f2";
         wrapped.strokeColor = "#11212e";
@@ -49,20 +50,20 @@ export class Main extends Laya.Script {
         wrapped.bgColor = "#1a2736";
         wrapped.borderColor = "#3b546d";
         wrapped.wordWrap = true;
-        wrapped.leading = 10;
+        wrapped.leading = 14;
         wrapped.letterSpacing = 1;
         wrapped.padding = "12,16,12,16";
-        wrapped.align = "center";
+        wrapped.align = "left";
         wrapped.valign = "middle";
-        wrapped.size(640, 96);
+        wrapped.size(640, 118);
         wrapped.pos(84, 490);
         this.owner.addChild(wrapped);
 
         const note = new Laya.Label();
-        note.text = "都使用同一套 MSDF 字图，仅字号不同，方便观察 distance-range / padding 对粗描边的影响。";
+        note.text = "富文本使用方式与 Laya Label 一致：文本放在 text，配合 html=true 或 ubb=true。";
         note.fontSize = 20;
         note.color = "#9cb4c7";
-        note.pos(84, 600);
+        note.pos(84, 602);
         this.owner.addChild(note);
     }
 

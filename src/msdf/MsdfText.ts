@@ -51,10 +51,57 @@ type MsdfTextOptions = {
     outlineWidth?: number;
 };
 
+export type MsdfRichTextStyle = {
+    fontSize: number;
+    textColor: Laya.Vector4;
+    textColorCss: string;
+    outlineColor: Laya.Vector4;
+    outlineColorCss: string;
+    outlineWidth: number;
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    underlineColorCss?: string | null;
+    strikethrough?: boolean;
+    strikethroughColorCss?: string | null;
+    align?: string | null;
+};
+
+export type MsdfRichTextRun = {
+    text: string;
+    style: MsdfRichTextStyle;
+};
+
+type MsdfRichTextCommand = {
+    text: string;
+    style: MsdfRichTextStyle;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    next: MsdfRichTextCommand | null;
+    prev: MsdfRichTextCommand | null;
+};
+
+type MsdfRichTextLine = {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    cmd: MsdfRichTextCommand | null;
+    align: string;
+};
+
 const DEFAULT_TEXT_COLOR = new Laya.Vector4(1, 1, 1, 1);
 const DEFAULT_OUTLINE_COLOR = new Laya.Vector4(0, 0, 0, 1);
 const STYLE_TEXTURE_WIDTH = 256;
 const STYLE_TEXTURE_HEIGHT = 2;
+const ITALIC_SKEW_DEGREES = 12;
+const BOLD_SCALE_X = 1.04;
+const emojiTest = /[\uD800-\uDBFF][\uDC00-\uDFFF]/;
+const wordBoundaryTest = /[a-zA-Z0-9\!-\+\/_]+$/;
+const punctuationChars = Array.from(".,，。、!！；;”’)）]】}》").map(char => char.charCodeAt(0));
+const maxWordLength = 20;
 
 function createEmptyLayout(): MsdfLayout {
     return {
@@ -76,6 +123,26 @@ function colorKey(color: Laya.Vector4): string {
 
 function styleKey(textColor: Laya.Vector4, outlineColor: Laya.Vector4): string {
     return `${colorKey(textColor)}|${colorKey(outlineColor)}`;
+}
+
+function styleScaleX(style: MsdfRichTextStyle): number {
+    return style.bold ? BOLD_SCALE_X : 1;
+}
+
+function styleSkewExtra(height: number, style: MsdfRichTextStyle): number {
+    if (!style.italic || height <= 0) {
+        return 0;
+    }
+
+    return Math.tan(ITALIC_SKEW_DEGREES * Math.PI / 180) * height;
+}
+
+function isHighSurrogate(code: number): boolean {
+    return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+    return code >= 0xdc00 && code <= 0xdfff;
 }
 
 function writePackedColor(target: Uint8Array, offset: number, color: Laya.Vector4): void {
@@ -231,6 +298,36 @@ export class MsdfBitmapFont {
         return new MsdfTextSprite(this, options);
     }
 
+    getLineHeight(fontSize: number): number {
+        return this.lineHeight * (fontSize / this.lineHeight);
+    }
+
+    measureTextWidth(text: string, fontSize: number, letterSpacing: number = 0): number {
+        const scale = fontSize / this.lineHeight;
+        let penX = 0;
+        let widestLine = 0;
+        let previousCode = -1;
+
+        for (const char of text) {
+            if (char === "\n") {
+                widestLine = Math.max(widestLine, penX);
+                penX = 0;
+                previousCode = -1;
+                continue;
+            }
+
+            const glyph = this.glyphs.get(char);
+            const kern = previousCode >= 0 && glyph
+                ? (this.kernings.get(kerningKey(previousCode, glyph.id)) ?? 0) * scale
+                : 0;
+
+            penX += (glyph ? glyph.xadvance * scale : fontSize * 0.5) + kern + letterSpacing * scale;
+            previousCode = glyph?.id ?? -1;
+        }
+
+        return Math.max(widestLine, penX);
+    }
+
     wrapText(text: string, fontSize: number, maxWidth: number, letterSpacing: number = 0): string {
         if (maxWidth <= 0) {
             return text;
@@ -366,9 +463,11 @@ export class MsdfBitmapFont {
 
         maxY = Math.max(maxY, lineCount * this.lineHeight * scale + Math.max(0, lineCount - 1) * lineSpacing);
 
+        const shiftY = minY < 0 ? minY : 0;
+
         for (let i = 0; i < vertices.length; i += 2) {
             vertices[i] -= minX;
-            vertices[i + 1] -= minY;
+            vertices[i + 1] -= shiftY;
         }
 
         return {
@@ -376,7 +475,7 @@ export class MsdfBitmapFont {
             uvs: new Float32Array(uvs),
             indices: new Uint16Array(indices),
             width: Math.max(widestLine, maxX - minX),
-            height: Math.max(lineCount * this.lineHeight * scale + Math.max(0, lineCount - 1) * lineSpacing, maxY - minY)
+            height: Math.max(lineCount * this.lineHeight * scale + Math.max(0, lineCount - 1) * lineSpacing, maxY - shiftY)
         };
     }
 }
@@ -535,5 +634,534 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
 
         this.size(this._layout.width, this._layout.height);
+    }
+}
+
+class MsdfTextRunSprite extends Laya.Sprite {
+    private readonly textSprite: MsdfTextSprite;
+    private font: MsdfBitmapFont;
+
+    constructor(font: MsdfBitmapFont) {
+        super();
+
+        this.font = font;
+        this.textSprite = font.createText({});
+        this.textSprite.mouseThrough = true;
+        this.mouseThrough = true;
+        this.addChild(this.textSprite);
+    }
+
+    apply(font: MsdfBitmapFont, text: string, style: MsdfRichTextStyle, letterSpacing: number): void {
+        if (this.font !== font) {
+            this.font = font;
+            this.textSprite.resetFont(font);
+        }
+
+        this.textSprite.text = text;
+        this.textSprite.fontSize = style.fontSize;
+        this.textSprite.letterSpacing = letterSpacing;
+        this.textSprite.lineSpacing = 0;
+        this.textSprite.textColor = style.textColor;
+        this.textSprite.outlineColor = style.outlineColor;
+        this.textSprite.outlineWidth = style.outlineWidth;
+        this.textSprite.refresh();
+
+        const baseWidth = this.textSprite.width;
+        const baseHeight = Math.max(this.textSprite.height, this.font.getLineHeight(style.fontSize));
+        const italicOffset = styleSkewExtra(baseHeight, style);
+        const renderWidth = baseWidth * styleScaleX(style) + italicOffset;
+
+        this.textSprite.pos(style.italic ? italicOffset : 0, 0);
+        this.textSprite.scale(styleScaleX(style), 1);
+        this.textSprite.skew(style.italic ? -ITALIC_SKEW_DEGREES : 0, 0);
+
+        this.drawDecorations(style, renderWidth, baseHeight);
+        this.size(renderWidth, baseHeight);
+    }
+
+    private drawDecorations(style: MsdfRichTextStyle, width: number, height: number): void {
+        this.graphics.clear();
+
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+
+        const thickness = Math.max(1, style.fontSize / 16);
+
+        if (style.underline) {
+            this.graphics.drawLine(0, height - thickness, width, height - thickness, style.underlineColorCss || style.textColorCss, thickness);
+        }
+
+        if (style.strikethrough) {
+            const strikeY = (height * 0.5 - thickness) | 0;
+            this.graphics.drawLine(-4, strikeY, width + 4, strikeY, style.strikethroughColorCss || style.textColorCss, thickness);
+        }
+    }
+}
+
+export class MsdfRichTextSprite extends Laya.Sprite {
+    private readonly runPool: MsdfTextRunSprite[] = [];
+    private readonly activeRuns: MsdfTextRunSprite[] = [];
+
+    private _runs: MsdfRichTextRun[] = [];
+    private _letterSpacing = 0;
+    private _lineSpacing = 0;
+    private _wordWrapWidth = 0;
+    private _layoutWidth = 0;
+    private _defaultAlign = "left";
+    private _contentWidth = 0;
+    private _contentHeight = 0;
+
+    constructor(private font: MsdfBitmapFont) {
+        super();
+        this.mouseThrough = true;
+    }
+
+    get letterSpacing(): number {
+        return this._letterSpacing;
+    }
+
+    set letterSpacing(value: number) {
+        this._letterSpacing = value;
+    }
+
+    get lineSpacing(): number {
+        return this._lineSpacing;
+    }
+
+    set lineSpacing(value: number) {
+        this._lineSpacing = value;
+    }
+
+    get wordWrapWidth(): number {
+        return this._wordWrapWidth;
+    }
+
+    set wordWrapWidth(value: number) {
+        this._wordWrapWidth = Math.max(0, value);
+    }
+
+    get layoutWidth(): number {
+        return this._layoutWidth;
+    }
+
+    set layoutWidth(value: number) {
+        this._layoutWidth = Math.max(0, value);
+    }
+
+    get defaultAlign(): string {
+        return this._defaultAlign;
+    }
+
+    set defaultAlign(value: string) {
+        this._defaultAlign = value || "left";
+    }
+
+    get contentWidth(): number {
+        return this._contentWidth;
+    }
+
+    get contentHeight(): number {
+        return this._contentHeight;
+    }
+
+    setRuns(value: MsdfRichTextRun[]): void {
+        this._runs = value;
+    }
+
+    resetFont(font: MsdfBitmapFont): void {
+        this.font = font;
+    }
+
+    refresh(): void {
+        if (this._runs.length === 0) {
+            this._contentWidth = 0;
+            this._contentHeight = 0;
+            this.recycleSprites(0);
+            this.size(this._layoutWidth, 0);
+            return;
+        }
+
+        const lines = this.layoutRuns();
+        const viewWidth = this._layoutWidth > 0 ? this._layoutWidth : this._contentWidth;
+
+        let spriteCount = 0;
+        for (const line of lines) {
+            const lineAlign = line.align || this._defaultAlign;
+            const lineOffsetX = lineAlign === "center"
+                ? Math.max((viewWidth - line.width) * 0.5, 0)
+                : lineAlign === "right"
+                    ? Math.max(viewWidth - line.width, 0)
+                    : 0;
+
+            let cmd = line.cmd;
+            while (cmd) {
+                const sprite = this.obtainSprite(spriteCount++);
+                sprite.apply(this.font, cmd.text, cmd.style, this._letterSpacing);
+                sprite.pos(lineOffsetX + cmd.x, line.y + cmd.y);
+                cmd = cmd.next;
+            }
+        }
+
+        this.recycleSprites(spriteCount);
+        this.size(viewWidth, this._contentHeight);
+    }
+
+    private layoutRuns(): MsdfRichTextLine[] {
+        const lines: MsdfRichTextLine[] = [];
+        const wordWrap = this._wordWrapWidth > 0;
+        const noBreakWord = wordWrap;
+        const rectWidth = wordWrap ? this._wordWrapWidth : Number.MAX_VALUE;
+
+        let lineX = 0;
+        let lineY = 0;
+        let lastHeight = this.font.getLineHeight(this._runs[0]?.style.fontSize ?? this.font.lineHeight);
+        let currentLine: MsdfRichTextLine | null = null;
+        let lastCmd: MsdfRichTextCommand | null = null;
+
+        const getTextWidth = (text: string, style: MsdfRichTextStyle): number => {
+            const baseWidth = this.font.measureTextWidth(text, style.fontSize, this._letterSpacing);
+            const baseHeight = this.font.getLineHeight(style.fontSize);
+            return baseWidth * styleScaleX(style) + styleSkewExtra(baseHeight, style);
+        };
+
+        const addCmd = (text: string, style: MsdfRichTextStyle, width?: number): void => {
+            if (!text) {
+                return;
+            }
+
+            const cmdHeight = Math.max(this.font.getLineHeight(style.fontSize), 1);
+            const cmd: MsdfRichTextCommand = {
+                text,
+                style,
+                x: lineX,
+                y: 0,
+                width: width ?? getTextWidth(text, style),
+                height: cmdHeight,
+                next: null,
+                prev: lastCmd
+            };
+
+            if (!currentLine) {
+                return;
+            }
+
+            if (!currentLine.cmd) {
+                currentLine.align = style.align || this._defaultAlign;
+            }
+
+            lineX += Math.round(cmd.width);
+            if (lastCmd) {
+                lastCmd.next = cmd;
+            } else {
+                currentLine.cmd = cmd;
+            }
+            lastCmd = cmd;
+            lastHeight = cmdHeight;
+        };
+
+        const addLine = (last: boolean = false): MsdfRichTextLine | null => {
+            lineX = 0;
+
+            if (currentLine) {
+                let lineHeight = 0;
+                let lineWidth = 0;
+                let cmd = currentLine.cmd;
+
+                while (cmd) {
+                    lineHeight = Math.max(lineHeight, cmd.height);
+                    lineWidth += cmd.width;
+                    cmd = cmd.next;
+                }
+
+                if (lineHeight === 0) {
+                    lineHeight = lastHeight;
+                }
+
+                currentLine.height = lineHeight;
+                currentLine.width = Math.round(lineWidth);
+
+                cmd = currentLine.cmd;
+                while (cmd) {
+                    cmd.y = Math.floor((lineHeight - cmd.height) * 0.5);
+                    cmd = cmd.next;
+                }
+
+                lineY += currentLine.height + this._lineSpacing;
+            }
+
+            if (last) {
+                return null;
+            }
+
+            currentLine = {
+                x: 0,
+                y: lineY,
+                width: 0,
+                height: 0,
+                cmd: null,
+                align: this._defaultAlign
+            };
+            lines.push(currentLine);
+            lastCmd = null;
+            return currentLine;
+        };
+
+        const splitCmd = (cmd: MsdfRichTextCommand, pos: number): boolean => {
+            const code = cmd.text.charCodeAt(pos);
+            if (isLowSurrogate(code)) {
+                pos--;
+            }
+
+            if (pos <= 0) {
+                return false;
+            }
+
+            const tail = cmd.text.substring(pos);
+            cmd.text = cmd.text.substring(0, pos);
+            cmd.width = getTextWidth(cmd.text, cmd.style);
+
+            const nextCmd: MsdfRichTextCommand = {
+                text: tail,
+                style: cmd.style,
+                x: 0,
+                y: 0,
+                width: getTextWidth(tail, cmd.style),
+                height: cmd.height,
+                next: cmd.next,
+                prev: cmd
+            };
+
+            if (nextCmd.next) {
+                nextCmd.next.prev = nextCmd;
+            }
+
+            cmd.next = nextCmd;
+            return true;
+        };
+
+        const moveCmds = (cmd: MsdfRichTextCommand | null): void => {
+            if (!cmd || !currentLine) {
+                return;
+            }
+
+            if (cmd.prev) {
+                cmd.prev.next = null;
+            }
+
+            while (cmd) {
+                const next = cmd.next;
+                cmd.x = lineX;
+                cmd.y = 0;
+                cmd.next = null;
+                cmd.prev = lastCmd;
+
+                if (!lastCmd) {
+                    currentLine.align = cmd.style.align || this._defaultAlign;
+                    currentLine.cmd = cmd;
+                } else {
+                    lastCmd.next = cmd;
+                }
+
+                lineX += Math.round(cmd.width);
+                lastCmd = cmd;
+                cmd = next;
+            }
+        };
+
+        const wrapText = (text: string, style: MsdfRichTextStyle): void => {
+            let remainWidth = Math.max(0, rectWidth - lineX);
+            let totalWidth = getTextWidth(text, style);
+            const italicExtra = styleSkewExtra(this.font.getLineHeight(style.fontSize), style);
+            const getCharWidth = (charText: string): number => this.font.measureTextWidth(charText, style.fontSize, this._letterSpacing) * styleScaleX(style);
+
+            if (totalWidth <= remainWidth) {
+                addCmd(text, style, totalWidth);
+                return;
+            }
+
+            let startIndex = 0;
+            let wordWidth = italicExtra;
+            let isPunctuation = false;
+            let match: RegExpExecArray | null = null;
+            const emoji = emojiTest.test(text);
+            const len = text.length;
+
+            for (let j = 0; j < len; j++) {
+                let charText = text.charAt(j);
+                const code = charText.charCodeAt(0);
+                if (emoji && isHighSurrogate(code) && j + 1 < len) {
+                    charText += text.charAt(j + 1);
+                }
+
+                let charWidth: number | null = getCharWidth(charText);
+                wordWidth += charWidth;
+
+                if (wordWidth <= remainWidth || (j === startIndex && lineX === 0)) {
+                    if (charText.length > 1) {
+                        j++;
+                    }
+                    continue;
+                }
+
+                let part = text.substring(startIndex, j);
+                wordWidth -= charWidth;
+
+                if (noBreakWord && ((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || (isPunctuation = punctuationChars.includes(code)))) {
+                    const wordBoundary = part.length > 0 ? ((match = wordBoundaryTest.exec(part)) ? match.index : null) : 0;
+                    if (wordBoundary > 0) {
+                        if (wordBoundary > part.length - maxWordLength) {
+                            j = startIndex + wordBoundary;
+                            part = text.substring(startIndex, j);
+                            wordWidth = getTextWidth(part, style);
+                            charWidth = null;
+                        }
+                    } else if (wordBoundary != null && lastCmd != null) {
+                        let cmd: MsdfRichTextCommand | null = lastCmd;
+                        let totalLen = part.length;
+                        let newLine = false;
+
+                        while (cmd) {
+                            if (cmd.width > 0) {
+                                match = wordBoundaryTest.exec(cmd.text);
+                                const textLen = cmd.text.length;
+                                if (match == null) {
+                                    addLine();
+                                    if (isPunctuation && totalLen === 0) {
+                                        if (splitCmd(cmd, textLen - 1)) {
+                                            moveCmds(cmd.next);
+                                        } else if (cmd.x > 0) {
+                                            moveCmds(cmd);
+                                        }
+                                    } else if (cmd.next) {
+                                        moveCmds(cmd.next);
+                                    }
+                                    newLine = true;
+                                    break;
+                                } else if (match.index > 0) {
+                                    if (match.index > textLen - (maxWordLength - totalLen)) {
+                                        addLine();
+                                        if (splitCmd(cmd, match.index)) {
+                                            moveCmds(cmd.next);
+                                        }
+                                        newLine = true;
+                                    }
+                                    break;
+                                } else {
+                                    totalLen += textLen;
+                                    if (totalLen >= maxWordLength) {
+                                        break;
+                                    }
+                                }
+                            }
+
+                            cmd = cmd.prev;
+                        }
+
+                        if (newLine) {
+                            remainWidth = rectWidth - lineX;
+                            if (charWidth != null && wordWidth + charWidth < remainWidth) {
+                                wordWidth += charWidth;
+                                continue;
+                            }
+                        }
+                    } else if (isPunctuation) {
+                        const backup = (emoji && j >= 1 && isLowSurrogate(text.charCodeAt(j - 1))) ? 2 : 1;
+                        if (j - backup > startIndex || lineX > 0) {
+                            j -= backup;
+                            part = text.substring(startIndex, j);
+                            wordWidth = getTextWidth(part, style);
+                            charWidth = null;
+                        }
+                    }
+                }
+
+                if (part.length > 0) {
+                    addCmd(part, style, wordWidth);
+                }
+
+                addLine();
+                startIndex = j;
+                remainWidth = rectWidth;
+                wordWidth = italicExtra;
+
+                if (charWidth != null) {
+                    wordWidth += charWidth;
+                    if (charText.length > 1) {
+                        j++;
+                    }
+                } else if (emoji && isHighSurrogate(text.charCodeAt(j))) {
+                    j++;
+                }
+
+                if (charWidth == null && j < len - 1) {
+                    wordWidth = getTextWidth(text.substring(startIndex, j + 1), style);
+                }
+            }
+
+            addCmd(text.substring(startIndex, len), style);
+        };
+
+        addLine();
+
+        for (const run of this._runs) {
+            if (!run.text) {
+                continue;
+            }
+
+            lastHeight = this.font.getLineHeight(run.style.fontSize);
+            const splitLines = run.text.split("\n");
+
+            for (let i = 0, n = splitLines.length; i < n; i++) {
+                const lineText = splitLines[i];
+                if (lineText.length > 0) {
+                    if (wordWrap) {
+                        wrapText(lineText, run.style);
+                    } else {
+                        addCmd(lineText, run.style);
+                    }
+                }
+
+                if (i !== n - 1) {
+                    addLine();
+                }
+            }
+        }
+
+        addLine(true);
+
+        let contentWidth = 0;
+        let contentHeight = 0;
+        for (const line of lines) {
+            contentWidth = Math.max(contentWidth, line.width);
+            contentHeight = Math.max(contentHeight, line.y + line.height);
+        }
+
+        this._contentWidth = contentWidth;
+        this._contentHeight = contentHeight;
+        return lines;
+    }
+
+    private obtainSprite(index: number): MsdfTextRunSprite {
+        let sprite = this.activeRuns[index];
+        if (!sprite) {
+            sprite = this.runPool.pop() ?? new MsdfTextRunSprite(this.font);
+            this.activeRuns[index] = sprite;
+        }
+
+        if (sprite.parent !== this) {
+            this.addChild(sprite);
+        }
+
+        return sprite;
+    }
+
+    private recycleSprites(usedCount: number): void {
+        for (let i = this.activeRuns.length - 1; i >= usedCount; i--) {
+            const sprite = this.activeRuns[i];
+            sprite.removeSelf();
+            this.runPool.push(sprite);
+            this.activeRuns.pop();
+        }
     }
 }

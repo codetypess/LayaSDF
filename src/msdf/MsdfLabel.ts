@@ -1,4 +1,4 @@
-import { MsdfBitmapFont, MsdfTextSprite } from "./MsdfText";
+import { MsdfBitmapFont, MsdfRichTextRun, MsdfRichTextSprite, MsdfRichTextStyle } from "./MsdfText";
 
 const DEFAULT_MSDF_SHADER_URL = "res://66e84b33-56bf-4d18-97d1-4239936447c2";
 const DEFAULT_MSDF_ATLAS_URL = "res://40ae4c4f-c490-4311-99f2-d7b00cd1976b";
@@ -32,7 +32,7 @@ function parsePadding(value: string): Padding {
 }
 
 function colorToVector4(value: string): Laya.Vector4 {
-    const num = Laya.Utils.fromStringColor(value);
+    const num = Laya.Utils.fromStringColor(value || "#ffffff");
     const r = ((num >> 16) & 0xff) / 255;
     const g = ((num >> 8) & 0xff) / 255;
     const b = (num & 0xff) / 255;
@@ -40,11 +40,29 @@ function colorToVector4(value: string): Laya.Vector4 {
     return new Laya.Vector4(r, g, b, a);
 }
 
+function normalizeColor(value: string | null | undefined, fallback: string): string {
+    return value || fallback;
+}
+
+function sameRichStyle(left: MsdfRichTextStyle, right: MsdfRichTextStyle): boolean {
+    return left.fontSize === right.fontSize
+        && left.textColorCss === right.textColorCss
+        && left.outlineColorCss === right.outlineColorCss
+        && left.outlineWidth === right.outlineWidth
+        && !!left.bold === !!right.bold
+        && !!left.italic === !!right.italic
+        && !!left.underline === !!right.underline
+        && (left.underlineColorCss ?? "") === (right.underlineColorCss ?? "")
+        && !!left.strikethrough === !!right.strikethrough
+        && (left.strikethroughColorCss ?? "") === (right.strikethroughColorCss ?? "")
+        && (left.align ?? "") === (right.align ?? "");
+}
+
 @regClass()
 export class MsdfLabel extends Laya.UIComponent {
     private static readonly fontCache = new Map<string, Promise<MsdfBitmapFont>>();
 
-    private _textSprite: MsdfTextSprite | null = null;
+    private _textSprite: MsdfRichTextSprite | null = null;
     private _font: MsdfBitmapFont | null = null;
     private _resourceKey = "";
     private _hasExplicitWidth = false;
@@ -63,6 +81,8 @@ export class MsdfLabel extends Laya.UIComponent {
     private _bgColor = "";
     private _borderColor = "";
     private _wordWrap = false;
+    private _html = false;
+    private _ubb = false;
 
     private _fontTextureUrl = DEFAULT_MSDF_ATLAS_URL;
     private _fontJsonUrl = DEFAULT_MSDF_FONT_JSON_URL;
@@ -247,6 +267,32 @@ export class MsdfLabel extends Laya.UIComponent {
         this.callLater(this.changeText);
     }
 
+    get html(): boolean {
+        return this._html;
+    }
+
+    set html(value: boolean) {
+        const next = !!value;
+        if (this._html === next) {
+            return;
+        }
+        this._html = next;
+        this.callLater(this.changeText);
+    }
+
+    get ubb(): boolean {
+        return this._ubb;
+    }
+
+    set ubb(value: boolean) {
+        const next = !!value;
+        if (this._ubb === next) {
+            return;
+        }
+        this._ubb = next;
+        this.callLater(this.changeText);
+    }
+
     get fontTextureUrl(): string {
         return this._fontTextureUrl;
     }
@@ -290,12 +336,12 @@ export class MsdfLabel extends Laya.UIComponent {
 
     protected measureWidth(): number {
         const padding = parsePadding(this._padding);
-        return (this._textSprite?.width ?? 0) + padding[1] + padding[3];
+        return (this._textSprite?.contentWidth ?? 0) + padding[1] + padding[3];
     }
 
     protected measureHeight(): number {
         const padding = parsePadding(this._padding);
-        return (this._textSprite?.height ?? 0) + padding[0] + padding[2];
+        return (this._textSprite?.contentHeight ?? 0) + padding[0] + padding[2];
     }
 
     protected commitMeasure(): void {
@@ -340,7 +386,7 @@ export class MsdfLabel extends Laya.UIComponent {
             this._font = font;
 
             if (!this._textSprite) {
-                this._textSprite = font.createText({});
+                this._textSprite = new MsdfRichTextSprite(font);
                 this._textSprite.mouseThrough = true;
                 this.addChild(this._textSprite);
             } else {
@@ -354,46 +400,147 @@ export class MsdfLabel extends Laya.UIComponent {
         });
     }
 
+    private createBaseTextStyle(): any {
+        const TextStyleCtor = (Laya as any).TextStyle;
+        const style = TextStyleCtor ? new TextStyleCtor() : {};
+
+        style.fontSize = this._fontSize;
+        style.color = this._color;
+        style.bold = false;
+        style.italic = false;
+        style.underline = false;
+        style.underlineColor = null;
+        style.strikethrough = false;
+        style.strikethroughColor = null;
+        style.align = this._align;
+        style.valign = this._valign;
+        style.leading = this._leading;
+        style.stroke = this._stroke;
+        style.strokeColor = this._strokeColor;
+
+        return style;
+    }
+
+    private toRichTextStyle(style: any): MsdfRichTextStyle {
+        const textColorCss = normalizeColor(style?.color, this._color);
+        const outlineColorCss = normalizeColor(style?.strokeColor, this._strokeColor);
+        const underlineColorCss = style?.underlineColor ? normalizeColor(style.underlineColor, textColorCss) : null;
+        const strikethroughColorCss = style?.strikethroughColor ? normalizeColor(style.strikethroughColor, textColorCss) : null;
+        const strokeValue = style?.stroke;
+        const outlineWidth = typeof strokeValue === "number"
+            ? strokeValue
+            : Number(strokeValue ?? this._stroke) || 0;
+
+        return {
+            fontSize: Number(style?.fontSize ?? this._fontSize) || this._fontSize,
+            textColor: colorToVector4(textColorCss),
+            textColorCss,
+            outlineColor: colorToVector4(outlineColorCss),
+            outlineColorCss,
+            outlineWidth,
+            bold: !!style?.bold,
+            italic: !!style?.italic,
+            underline: !!style?.underline,
+            underlineColorCss,
+            strikethrough: !!style?.strikethrough,
+            strikethroughColorCss,
+            align: style?.align || this._align
+        };
+    }
+
+    private appendRichTextRun(runs: MsdfRichTextRun[], text: string, style: MsdfRichTextStyle): void {
+        if (!text) {
+            return;
+        }
+
+        const previous = runs[runs.length - 1];
+        if (previous && sameRichStyle(previous.style, style)) {
+            previous.text += text;
+            return;
+        }
+
+        runs.push({ text, style });
+    }
+
+    private buildTextRuns(): MsdfRichTextRun[] {
+        const sourceText = this._text.replace(/\r\n?/g, "\n");
+        const baseStyle = this.createBaseTextStyle();
+        const runs: MsdfRichTextRun[] = [];
+
+        let parsedText = sourceText;
+        let useHtml = this._html;
+
+        if (this._ubb) {
+            const ubbParser = (Laya as any).UBBParser?.defaultParser;
+            if (ubbParser) {
+                parsedText = ubbParser.parse(parsedText);
+                useHtml = true;
+            }
+        }
+
+        if (!useHtml) {
+            this.appendRichTextRun(runs, parsedText, this.toRichTextStyle(baseStyle));
+            return runs;
+        }
+
+        const htmlParser = (Laya as any).HtmlParser?.defaultParser;
+        const htmlElementType = (Laya as any).HtmlElementType;
+        const htmlElement = (Laya as any).HtmlElement;
+
+        if (!htmlParser || !htmlElementType) {
+            this.appendRichTextRun(runs, parsedText, this.toRichTextStyle(baseStyle));
+            return runs;
+        }
+
+        const elements: any[] = [];
+        htmlParser.parse(parsedText, baseStyle, elements);
+
+        for (const element of elements) {
+            if (element.type !== htmlElementType.Text || !element.text) {
+                continue;
+            }
+
+            this.appendRichTextRun(runs, element.text, this.toRichTextStyle(element.style));
+        }
+
+        if (htmlElement?.returnToPool) {
+            htmlElement.returnToPool(elements);
+        }
+
+        return runs;
+    }
+
     private changeText(): void {
         if (!this._font || !this._textSprite) {
             return;
         }
 
         const padding = parsePadding(this._padding);
-        const wrapWidth = this._wordWrap && this._hasExplicitWidth
+        const availableWidth = this._hasExplicitWidth
             ? Math.max(this.width - padding[1] - padding[3], 0)
             : 0;
+        const wrapWidth = this._wordWrap && this._hasExplicitWidth ? availableWidth : 0;
 
-        this._textSprite.text = wrapWidth > 0
-            ? this._font.wrapText(this._text, this._fontSize, wrapWidth, this._letterSpacing)
-            : this._text;
-        this._textSprite.fontSize = this._fontSize;
+        this._textSprite.layoutWidth = this._hasExplicitWidth ? availableWidth : 0;
+        this._textSprite.wordWrapWidth = wrapWidth;
         this._textSprite.letterSpacing = this._letterSpacing;
         this._textSprite.lineSpacing = this._leading;
-        this._textSprite.textColor = colorToVector4(this._color);
-        this._textSprite.outlineColor = colorToVector4(this._strokeColor);
-        this._textSprite.outlineWidth = this._stroke;
+        this._textSprite.defaultAlign = this._align;
+        this._textSprite.setRuns(this.buildTextRuns());
         this._textSprite.refresh();
 
-        const measuredWidth = this._textSprite.width + padding[1] + padding[3];
-        const measuredHeight = this._textSprite.height + padding[0] + padding[2];
+        const measuredWidth = this._textSprite.contentWidth + padding[1] + padding[3];
+        const measuredHeight = this._textSprite.contentHeight + padding[0] + padding[2];
         const layoutWidth = this._hasExplicitWidth ? this.width : measuredWidth;
         const layoutHeight = this._hasExplicitHeight ? this.height : measuredHeight;
-        const availableWidth = this._hasExplicitWidth ? Math.max(layoutWidth - padding[1] - padding[3], 0) : this._textSprite.width;
-        const availableHeight = this._hasExplicitHeight ? Math.max(layoutHeight - padding[0] - padding[2], 0) : this._textSprite.height;
+        const availableHeight = this._hasExplicitHeight ? Math.max(layoutHeight - padding[0] - padding[2], 0) : this._textSprite.contentHeight;
 
-        let x = padding[3];
-        if (this._align === "center") {
-            x += Math.max((availableWidth - this._textSprite.width) * 0.5, 0);
-        } else if (this._align === "right") {
-            x += Math.max(availableWidth - this._textSprite.width, 0);
-        }
-
+        const x = padding[3];
         let y = padding[0];
         if (this._valign === "middle") {
-            y += Math.max((availableHeight - this._textSprite.height) * 0.5, 0);
+            y += Math.max((availableHeight - this._textSprite.contentHeight) * 0.5, 0);
         } else if (this._valign === "bottom") {
-            y += Math.max(availableHeight - this._textSprite.height, 0);
+            y += Math.max(availableHeight - this._textSprite.contentHeight, 0);
         }
 
         this._textSprite.pos(x, y);

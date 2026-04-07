@@ -9,6 +9,9 @@
     "experimentalDecorators": true,
     "skipLibCheck": true,
     "moduleResolution": "node",
+    "lib": [
+      "DOM", "ES2017"
+    ],
     "allowSyntheticDefaultImports": true,
     "paths": {
       "~/packages/*": [

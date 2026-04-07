@@ -34,6 +34,8 @@ this.owner.addChild(label);
 Supported common properties:
 
 - `text`
+- `html`
+- `ubb`
 - `fontSize`
 - `color`
 - `stroke`
@@ -49,6 +51,25 @@ Supported common properties:
 - `fontTextureUrl`
 - `fontJsonUrl`
 - `fontShaderUrl`
+
+Rich text follows the same usage style as `Laya.Label`: keep the markup in `text`, then enable `html` or `ubb`.
+
+```ts
+const rich = new MsdfLabel("支持 <font color=\"#f9e38f\" size=\"36\">HTML</font>、<i>斜体</i>、<u>下划线</u>");
+rich.html = true;
+
+const ubb = new MsdfLabel("[color=#7dd3fc]UBB[/color] [u]也可用[/u]");
+ubb.ubb = true;
+```
+
+Current rich-text rendering supports:
+
+- per-run `color`
+- per-run `size`
+- `b` / `i` (simulated with horizontal scale / skew)
+- `u`
+- `strike`
+- paragraph/text align inherited from the parsed style
 
 Regenerate the demo atlas:
 
