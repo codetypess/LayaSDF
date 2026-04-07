@@ -89,6 +89,7 @@ export class MsdfLabel extends Laya.UIComponent {
     private _fontTextureUrl = DEFAULT_MSDF_ATLAS_URL;
     private _fontJsonUrl = DEFAULT_MSDF_FONT_JSON_URL;
     private _fontShaderUrl = DEFAULT_MSDF_SHADER_URL;
+    private _paddingValues: Padding = [0, 0, 0, 0];
 
     constructor(text?: string) {
         super(false);
@@ -182,7 +183,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._valign = value || "top";
-        this.callLater(this.changeText);
+        this.callLater(this.updateLayoutFrame);
     }
 
     get leading(): number {
@@ -206,6 +207,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._padding = value || "0,0,0,0";
+        this._paddingValues = parsePadding(this._padding);
         this.callLater(this.changeText);
     }
 
@@ -242,7 +244,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._bgColor = value || "";
-        this.callLater(this.changeText);
+        this.callLater(this.updateLayoutFrame);
     }
 
     get borderColor(): string {
@@ -254,7 +256,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._borderColor = value || "";
-        this.callLater(this.changeText);
+        this.callLater(this.updateLayoutFrame);
     }
 
     get wordWrap(): boolean {
@@ -389,13 +391,11 @@ export class MsdfLabel extends Laya.UIComponent {
     }
 
     protected measureWidth(): number {
-        const padding = parsePadding(this._padding);
-        return (this._textSprite?.contentWidth ?? 0) + padding[1] + padding[3];
+        return (this._textSprite?.contentWidth ?? 0) + this._paddingValues[1] + this._paddingValues[3];
     }
 
     protected measureHeight(): number {
-        const padding = parsePadding(this._padding);
-        return (this._textSprite?.contentHeight ?? 0) + padding[0] + padding[2];
+        return (this._textSprite?.contentHeight ?? 0) + this._paddingValues[0] + this._paddingValues[2];
     }
 
     protected commitMeasure(): void {
@@ -565,7 +565,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
 
-        const padding = parsePadding(this._padding);
+        const padding = this._paddingValues;
         const availableWidth = this._hasExplicitWidth
             ? Math.max(this.width - padding[1] - padding[3], 0)
             : 0;
@@ -578,7 +578,15 @@ export class MsdfLabel extends Laya.UIComponent {
         this._textSprite.defaultAlign = this._align;
         this._textSprite.setRuns(this.buildTextRuns());
         this._textSprite.refresh();
+        this.updateLayoutFrame();
+    }
 
+    private updateLayoutFrame(): void {
+        if (!this._textSprite) {
+            return;
+        }
+
+        const padding = this._paddingValues;
         const measuredWidth = this._textSprite.contentWidth + padding[1] + padding[3];
         const measuredHeight = this._textSprite.contentHeight + padding[0] + padding[2];
         const layoutWidth = this._hasExplicitWidth ? this.width : measuredWidth;

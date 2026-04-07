@@ -51,6 +51,20 @@ type MsdfDrawBatch = {
     outlineWidth: number;
 };
 
+type MsdfDrawBatchGroup = {
+    textColor: Laya.Vector4;
+    outlineColor: Laya.Vector4;
+    outlineWidth: number;
+    renderStyleKey: string;
+    vertexChunks: Float32Array[];
+    uvChunks: Float32Array[];
+    indexChunks: Uint16Array[];
+    vertexFloatCount: number;
+    uvFloatCount: number;
+    indexCount: number;
+    vertexCount: number;
+};
+
 type MsdfTextOptions = {
     text?: string;
     fontSize?: number;
@@ -129,8 +143,9 @@ const DECORATION_SOURCE_CHAR_CODE = 0xe000;
 const DECORATION_SOURCE_CHAR = String.fromCodePoint(DECORATION_SOURCE_CHAR_CODE);
 const emojiTest = /[\uD800-\uDBFF][\uDC00-\uDFFF]/;
 const wordBoundaryTest = /[a-zA-Z0-9\!-\+\/_]+$/;
-const punctuationChars = Array.from(".,，。、!！；;”’)）]】}》").map(char => char.charCodeAt(0));
+const punctuationChars = new Set(Array.from(".,，。、!！；;”’)）]】}》").map(char => char.charCodeAt(0)));
 const maxWordLength = 20;
+const KERNING_KEY_MULTIPLIER = 0x110000;
 
 function createEmptyLayout(): MsdfLayout {
     return {
@@ -156,6 +171,96 @@ function styleKey(textColor: Laya.Vector4, outlineColor: Laya.Vector4): string {
 
 function renderStyleKey(textColor: Laya.Vector4, outlineColor: Laya.Vector4, outlineWidth: number): string {
     return `${styleKey(textColor, outlineColor)}|${outlineWidth.toFixed(4)}`;
+}
+
+function createBatchGroup(batch: MsdfDrawBatch): MsdfDrawBatchGroup {
+    return {
+        textColor: batch.textColor,
+        outlineColor: batch.outlineColor,
+        outlineWidth: batch.outlineWidth,
+        renderStyleKey: renderStyleKey(batch.textColor, batch.outlineColor, batch.outlineWidth),
+        vertexChunks: [batch.vertices],
+        uvChunks: [batch.uvs],
+        indexChunks: [batch.indices],
+        vertexFloatCount: batch.vertices.length,
+        uvFloatCount: batch.uvs.length,
+        indexCount: batch.indices.length,
+        vertexCount: batch.vertices.length >> 1
+    };
+}
+
+function finalizeBatchGroup(group: MsdfDrawBatchGroup): MsdfDrawBatch {
+    if (group.vertexChunks.length === 1) {
+        return {
+            vertices: group.vertexChunks[0],
+            uvs: group.uvChunks[0],
+            indices: group.indexChunks[0],
+            textColor: group.textColor,
+            outlineColor: group.outlineColor,
+            outlineWidth: group.outlineWidth
+        };
+    }
+
+    const vertices = new Float32Array(group.vertexFloatCount);
+    const uvs = new Float32Array(group.uvFloatCount);
+    const indices = new Uint16Array(group.indexCount);
+    let vertexFloatOffset = 0;
+    let uvFloatOffset = 0;
+    let indexOffset = 0;
+    let vertexBase = 0;
+
+    for (let i = 0; i < group.vertexChunks.length; i++) {
+        const vertexChunk = group.vertexChunks[i];
+        const uvChunk = group.uvChunks[i];
+        const indexChunk = group.indexChunks[i];
+
+        vertices.set(vertexChunk, vertexFloatOffset);
+        uvs.set(uvChunk, uvFloatOffset);
+
+        for (let j = 0; j < indexChunk.length; j++) {
+            indices[indexOffset + j] = indexChunk[j] + vertexBase;
+        }
+
+        vertexFloatOffset += vertexChunk.length;
+        uvFloatOffset += uvChunk.length;
+        indexOffset += indexChunk.length;
+        vertexBase += vertexChunk.length >> 1;
+    }
+
+    return {
+        vertices,
+        uvs,
+        indices,
+        textColor: group.textColor,
+        outlineColor: group.outlineColor,
+        outlineWidth: group.outlineWidth
+    };
+}
+
+function appendBatchGroup(groups: MsdfDrawBatch[], pendingGroup: MsdfDrawBatchGroup | null): MsdfDrawBatchGroup | null {
+    if (pendingGroup) {
+        groups.push(finalizeBatchGroup(pendingGroup));
+    }
+
+    return null;
+}
+
+function canMergeBatchGroup(group: MsdfDrawBatchGroup, batch: MsdfDrawBatch): boolean {
+    if (group.renderStyleKey !== renderStyleKey(batch.textColor, batch.outlineColor, batch.outlineWidth)) {
+        return false;
+    }
+
+    return group.vertexCount + (batch.vertices.length >> 1) <= 65535;
+}
+
+function mergeBatchGroup(group: MsdfDrawBatchGroup, batch: MsdfDrawBatch): void {
+    group.vertexChunks.push(batch.vertices);
+    group.uvChunks.push(batch.uvs);
+    group.indexChunks.push(batch.indices);
+    group.vertexFloatCount += batch.vertices.length;
+    group.uvFloatCount += batch.uvs.length;
+    group.indexCount += batch.indices.length;
+    group.vertexCount += batch.vertices.length >> 1;
 }
 
 function styleScaleX(style: MsdfRichTextStyle): number {
@@ -251,8 +356,8 @@ function applyMaterialBase(material: Laya.Material, font: MsdfBitmapFont, styleR
     material.setFloat("u_UseStyleTexture", useStyleTexture ? 1 : 0);
 }
 
-function kerningKey(first: number, second: number): string {
-    return `${first}:${second}`;
+function kerningKey(first: number, second: number): number {
+    return first * KERNING_KEY_MULTIPLIER + second;
 }
 
 function normalizeFontJson(raw: any): MsdfFontJson {
@@ -280,7 +385,7 @@ export class MsdfBitmapFont {
     readonly distanceRange: number;
 
     private readonly glyphs = new Map<string, MsdfGlyph>();
-    private readonly kernings = new Map<string, number>();
+    private readonly kernings = new Map<number, number>();
     private readonly decorationGlyph: MsdfGlyph | null = null;
     private _renderState: MsdfFontRenderState | null = null;
     private _missingDecorationGlyphReported = false;
@@ -341,6 +446,7 @@ export class MsdfBitmapFont {
 
     measureTextWidth(text: string, fontSize: number, letterSpacing: number = 0): number {
         const scale = fontSize / this.lineHeight;
+        const scaledLetterSpacing = letterSpacing * scale;
         let penX = 0;
         let widestLine = 0;
         let previousCode = -1;
@@ -358,7 +464,7 @@ export class MsdfBitmapFont {
                 ? (this.kernings.get(kerningKey(previousCode, glyph.id)) ?? 0) * scale
                 : 0;
 
-            penX += (glyph ? glyph.xadvance * scale : fontSize * 0.5) + kern + letterSpacing * scale;
+            penX += (glyph ? glyph.xadvance * scale : fontSize * 0.5) + kern + scaledLetterSpacing;
             previousCode = glyph?.id ?? -1;
         }
 
@@ -404,6 +510,7 @@ export class MsdfBitmapFont {
         }
 
         const scale = fontSize / this.lineHeight;
+        const scaledLetterSpacing = letterSpacing * scale;
         let lineWidth = 0;
         let previousCode = -1;
         let result = "";
@@ -421,7 +528,7 @@ export class MsdfBitmapFont {
             const kern = previousCode >= 0 && glyph
                 ? (this.kernings.get(kerningKey(previousCode, glyph.id)) ?? 0) * scale
                 : 0;
-            const nextWidth = lineWidth + kern + advance + letterSpacing * scale;
+            const nextWidth = lineWidth + kern + advance + scaledLetterSpacing;
 
             if (lineWidth > 0 && nextWidth > maxWidth) {
                 result += "\n";
@@ -430,7 +537,7 @@ export class MsdfBitmapFont {
             }
 
             result += char;
-            lineWidth += (glyph ? glyph.xadvance * scale : fontSize * 0.5) + kern + letterSpacing * scale;
+            lineWidth += (glyph ? glyph.xadvance * scale : fontSize * 0.5) + kern + scaledLetterSpacing;
             previousCode = glyph?.id ?? -1;
         }
 
@@ -439,6 +546,7 @@ export class MsdfBitmapFont {
 
     buildLayout(text: string, fontSize: number, letterSpacing: number = 0, lineSpacing: number = 0, decorations: MsdfDecorationOptions = {}): MsdfLayout {
         const scale = fontSize / this.lineHeight;
+        const scaledLetterSpacing = letterSpacing * scale;
         const vertices: number[] = [];
         const uvs: number[] = [];
         const indices: number[] = [];
@@ -540,7 +648,7 @@ export class MsdfBitmapFont {
 
             pushQuad(glyph, left, top, right, bottom);
 
-            penX += (glyph.xadvance + letterSpacing) * scale;
+            penX += glyph.xadvance * scale + scaledLetterSpacing;
             currentLineWidth = Math.max(currentLineWidth, penX);
             previousCode = glyph.id;
         }
@@ -834,6 +942,8 @@ export class MsdfTextSprite extends Laya.Sprite {
         const lines = this.layoutRuns();
         const viewWidth = this._layoutWidth > 0 ? this._layoutWidth : this._contentWidth;
         const drawBatches: MsdfDrawBatch[] = [];
+        const layoutCache = new WeakMap<MsdfRichTextStyle, Map<string, MsdfLayout>>();
+        let pendingGroup: MsdfDrawBatchGroup | null = null;
 
         for (const line of lines) {
             const lineAlign = line.align || this._defaultAlign;
@@ -845,13 +955,20 @@ export class MsdfTextSprite extends Laya.Sprite {
 
             let cmd = line.cmd;
             while (cmd) {
-                const batch = this.buildRunBatch(cmd, lineOffsetX + cmd.x, line.y + cmd.y);
+                const batch = this.buildRunBatch(cmd, lineOffsetX + cmd.x, line.y + cmd.y, layoutCache);
                 if (batch) {
-                    drawBatches.push(batch);
+                    if (pendingGroup && canMergeBatchGroup(pendingGroup, batch)) {
+                        mergeBatchGroup(pendingGroup, batch);
+                    } else {
+                        pendingGroup = appendBatchGroup(drawBatches, pendingGroup);
+                        pendingGroup = createBatchGroup(batch);
+                    }
                 }
                 cmd = cmd.next;
             }
         }
+
+        appendBatchGroup(drawBatches, pendingGroup);
 
         this._layout = createEmptyLayout();
         this._drawBatches = drawBatches;
@@ -934,6 +1051,10 @@ export class MsdfTextSprite extends Laya.Sprite {
         const wordWrap = this._wordWrapWidth > 0;
         const noBreakWord = wordWrap;
         const rectWidth = wordWrap ? this._wordWrapWidth : Number.MAX_VALUE;
+        const metricCache = new WeakMap<MsdfRichTextStyle, {
+            render: { extraWidth: number; height: number; };
+            text: Map<string, { width: number; height: number; }>;
+        }>();
 
         let lineX = 0;
         let lineY = 0;
@@ -941,7 +1062,12 @@ export class MsdfTextSprite extends Laya.Sprite {
         let currentLine: MsdfRichTextLine | null = null;
         let lastCmd: MsdfRichTextCommand | null = null;
 
-        const getStyleRenderMetrics = (style: MsdfRichTextStyle): { extraWidth: number; height: number; } => {
+        const getMetricBucket = (style: MsdfRichTextStyle) => {
+            let bucket = metricCache.get(style);
+            if (bucket) {
+                return bucket;
+            }
+
             const lineHeight = this.font.getLineHeight(style.fontSize);
             let renderHeight = lineHeight;
             let extraWidth = 0;
@@ -962,16 +1088,32 @@ export class MsdfTextSprite extends Laya.Sprite {
                 }
             }
 
-            return { extraWidth, height: renderHeight };
+            bucket = {
+                render: { extraWidth, height: renderHeight },
+                text: new Map()
+            };
+            metricCache.set(style, bucket);
+            return bucket;
+        };
+
+        const getStyleRenderMetrics = (style: MsdfRichTextStyle): { extraWidth: number; height: number; } => {
+            return getMetricBucket(style).render;
         };
 
         const getTextMetrics = (text: string, style: MsdfRichTextStyle): { width: number; height: number; } => {
-            const styleMetrics = getStyleRenderMetrics(style);
-            const baseWidth = this.font.measureTextWidth(text, style.fontSize, this._letterSpacing) + styleMetrics.extraWidth;
-            return {
-                width: baseWidth * styleScaleX(style) + styleSkewExtra(styleMetrics.height, style),
-                height: styleMetrics.height
+            const bucket = getMetricBucket(style);
+            const cached = bucket.text.get(text);
+            if (cached) {
+                return cached;
+            }
+
+            const baseWidth = this.font.measureTextWidth(text, style.fontSize, this._letterSpacing) + bucket.render.extraWidth;
+            const metrics = {
+                width: baseWidth * styleScaleX(style) + styleSkewExtra(bucket.render.height, style),
+                height: bucket.render.height
             };
+            bucket.text.set(text, metrics);
+            return metrics;
         };
 
         const addCmd = (text: string, style: MsdfRichTextStyle, metrics?: { width: number; height: number; }): void => {
@@ -1159,7 +1301,7 @@ export class MsdfTextSprite extends Laya.Sprite {
                 let part = text.substring(startIndex, j);
                 wordWidth -= charWidth;
 
-                if (noBreakWord && ((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || (isPunctuation = punctuationChars.includes(code)))) {
+                if (noBreakWord && ((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || (isPunctuation = punctuationChars.has(code)))) {
                     const wordBoundary = part.length > 0 ? ((match = wordBoundaryTest.exec(part)) ? match.index : null) : 0;
                     if (wordBoundary > 0) {
                         if (wordBoundary > part.length - maxWordLength) {
@@ -1294,18 +1436,28 @@ export class MsdfTextSprite extends Laya.Sprite {
         return lines;
     }
 
-    private buildRunBatch(cmd: MsdfRichTextCommand, x: number, y: number): MsdfDrawBatch | null {
+    private buildRunBatch(cmd: MsdfRichTextCommand, x: number, y: number, layoutCache?: WeakMap<MsdfRichTextStyle, Map<string, MsdfLayout>>): MsdfDrawBatch | null {
         const style = cmd.style;
-        const layout = this.font.buildLayout(
-            cmd.text,
-            style.fontSize,
-            this._letterSpacing,
-            0,
-            {
-                underline: !!style.underline,
-                strikethrough: !!style.strikethrough
-            }
-        );
+        let styleLayouts = layoutCache?.get(style);
+        if (!styleLayouts && layoutCache) {
+            styleLayouts = new Map();
+            layoutCache.set(style, styleLayouts);
+        }
+
+        let layout = styleLayouts?.get(cmd.text);
+        if (!layout) {
+            layout = this.font.buildLayout(
+                cmd.text,
+                style.fontSize,
+                this._letterSpacing,
+                0,
+                {
+                    underline: !!style.underline,
+                    strikethrough: !!style.strikethrough
+                }
+            );
+            styleLayouts?.set(cmd.text, layout);
+        }
 
         if (layout.indices.length === 0) {
             return null;

@@ -54,7 +54,7 @@ const resolvedCharset = resolve(charsetPath);
 const textureOut = resolve(getArg("--texture-out", "assets/resources/msdf/msdf-demo.png"));
 const jsonOut = resolve(getArg("--json-out", "assets/resources/msdf/source-han-sans-cn-medium.json"));
 const fontSize = getArg("--font-size", "56");
-const textureSize = getArg("--texture-size", "512,512");
+const textureSize = getArg("--texture-size", "2048,2048");
 const padding = getArg("--padding", "4");
 const distanceRange = getArg("--distance-range", "6");
 const fieldType = getArg("--field-type", "msdf");
@@ -70,6 +70,7 @@ const generatedTexture = `${tempTextureBase}.png`;
 const args = [
     "--yes",
     "msdf-bmfont-xml",
+    "--pot",
     "-f", "json",
     "-i", resolvedCharset,
     "-o", tempTextureBase,
