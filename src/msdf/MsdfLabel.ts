@@ -1,4 +1,4 @@
-import { MsdfBitmapFont, MsdfRichTextRun, MsdfRichTextSprite, MsdfRichTextStyle } from "./MsdfText";
+import { MsdfBitmapFont, MsdfRichTextRun, MsdfRichTextStyle, MsdfTextSprite } from "./MsdfText";
 
 const DEFAULT_MSDF_SHADER_URL = "res://66e84b33-56bf-4d18-97d1-4239936447c2";
 const DEFAULT_MSDF_ATLAS_URL = "res://40ae4c4f-c490-4311-99f2-d7b00cd1976b";
@@ -60,7 +60,7 @@ function sameRichStyle(left: MsdfRichTextStyle, right: MsdfRichTextStyle): boole
 export class MsdfLabel extends Laya.UIComponent {
     private static readonly fontCache = new Map<string, Promise<MsdfBitmapFont>>();
 
-    private _textSprite: MsdfRichTextSprite | null = null;
+    private _textSprite: MsdfTextSprite | null = null;
     private _font: MsdfBitmapFont | null = null;
     private _resourceKey = "";
     private _hasExplicitWidth = false;
@@ -440,7 +440,7 @@ export class MsdfLabel extends Laya.UIComponent {
             this._font = font;
 
             if (!this._textSprite) {
-                this._textSprite = new MsdfRichTextSprite(font);
+                this._textSprite = new MsdfTextSprite(font);
                 this._textSprite.mouseThrough = true;
                 this.addChild(this._textSprite);
             } else {

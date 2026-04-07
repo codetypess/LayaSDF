@@ -42,6 +42,15 @@ type MsdfLayout = {
     height: number;
 };
 
+type MsdfDrawBatch = {
+    vertices: Float32Array;
+    uvs: Float32Array;
+    indices: Uint16Array;
+    textColor: Laya.Vector4;
+    outlineColor: Laya.Vector4;
+    outlineWidth: number;
+};
+
 type MsdfTextOptions = {
     text?: string;
     fontSize?: number;
@@ -143,6 +152,10 @@ function colorKey(color: Laya.Vector4): string {
 
 function styleKey(textColor: Laya.Vector4, outlineColor: Laya.Vector4): string {
     return `${colorKey(textColor)}|${colorKey(outlineColor)}`;
+}
+
+function renderStyleKey(textColor: Laya.Vector4, outlineColor: Laya.Vector4, outlineWidth: number): string {
+    return `${styleKey(textColor, outlineColor)}|${outlineWidth.toFixed(4)}`;
 }
 
 function styleScaleX(style: MsdfRichTextStyle): number {
@@ -611,7 +624,15 @@ export class MsdfTextSprite extends Laya.Sprite {
     private _underline: boolean;
     private _strikethrough: boolean;
     private _layout: MsdfLayout = createEmptyLayout();
-    private _styleIndex = 0;
+    private _runs: MsdfRichTextRun[] = [];
+    private _usesRuns = false;
+    private _wordWrapWidth = 0;
+    private _layoutWidth = 0;
+    private _defaultAlign = "left";
+    private _contentWidth = 0;
+    private _contentHeight = 0;
+    private _drawBatches: MsdfDrawBatch[] = [];
+    private _multiStyleFallbackReported = false;
 
     constructor(private font: MsdfBitmapFont, options: MsdfTextOptions = {}) {
         super();
@@ -642,10 +663,12 @@ export class MsdfTextSprite extends Laya.Sprite {
     }
 
     set text(value: string) {
-        if (this._text === value) {
+        if (!this._usesRuns && this._text === value) {
             return;
         }
-        this._text = value;
+        this._text = value ?? "";
+        this._usesRuns = false;
+        this._runs = [];
         this.refresh();
     }
 
@@ -671,193 +694,6 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
         this._lineSpacing = value;
         this.refresh();
-    }
-
-    set textColor(value: Laya.Vector4) {
-        this._textColor = value;
-        if (this.useBatchStyleData) {
-            this.redraw();
-        } else {
-            this.syncMaterial();
-        }
-    }
-
-    set outlineColor(value: Laya.Vector4) {
-        this._outlineColor = value;
-        if (this.useBatchStyleData) {
-            this.redraw();
-        } else {
-            this.syncMaterial();
-        }
-    }
-
-    set outlineWidth(value: number) {
-        this._outlineWidth = value;
-        if (this.useBatchStyleData) {
-            this.redraw();
-        } else {
-            this.syncMaterial();
-        }
-    }
-
-    set underline(value: boolean) {
-        if (this._underline === value) {
-            return;
-        }
-        this._underline = value;
-        this.refresh();
-    }
-
-    set strikethrough(value: boolean) {
-        if (this._strikethrough === value) {
-            return;
-        }
-        this._strikethrough = value;
-        this.refresh();
-    }
-
-    resetFont(font: MsdfBitmapFont): void {
-        this.font = font;
-        if (this.useBatchStyleData) {
-            this.materialInstance = this.font.renderState.material;
-            this.material = this.materialInstance;
-        }
-        this.syncMaterial();
-        this.refresh();
-    }
-
-    refresh(): void {
-        this._layout = this.font.buildLayout(
-            this._text,
-            this._fontSize,
-            this._letterSpacing,
-            this._lineSpacing,
-            {
-                underline: this._underline,
-                strikethrough: this._strikethrough
-            }
-        );
-        this.redraw();
-    }
-
-    private syncMaterial(): void {
-        const renderState = this.font.renderState;
-
-        if (this.useBatchStyleData) {
-            this._styleIndex = renderState.styleRegistry.register(this._textColor, this._outlineColor);
-            return;
-        }
-
-        applyMaterialBase(this.materialInstance, this.font, renderState.styleRegistry, false);
-        this.materialInstance.setVector4("u_TextColor", this._textColor);
-        this.materialInstance.setVector4("u_OutlineColor", this._outlineColor);
-        this.materialInstance.setFloat("u_OutlineWidth", this._outlineWidth);
-    }
-
-    private redraw(): void {
-        this.syncMaterial();
-        this.graphics.clear(true);
-
-        if (this._layout.indices.length > 0) {
-            if (this.useBatchStyleData) {
-                this.graphics.drawTriangles(
-                    this.font.texture,
-                    0,
-                    0,
-                    this._layout.vertices,
-                    this._layout.uvs,
-                    this._layout.indices,
-                    null,
-                    1,
-                    null,
-                    null,
-                    this._styleIndex,
-                    this._outlineWidth
-                );
-            } else {
-                this.graphics.drawTriangles(this.font.texture, 0, 0, this._layout.vertices, this._layout.uvs, this._layout.indices);
-            }
-        }
-
-        this.size(this._layout.width, this._layout.height);
-    }
-}
-
-class MsdfTextRunSprite extends Laya.Sprite {
-    private readonly textSprite: MsdfTextSprite;
-    private font: MsdfBitmapFont;
-
-    constructor(font: MsdfBitmapFont) {
-        super();
-
-        this.font = font;
-        this.textSprite = font.createText({});
-        this.textSprite.mouseThrough = true;
-        this.mouseThrough = true;
-        this.addChild(this.textSprite);
-    }
-
-    apply(font: MsdfBitmapFont, text: string, style: MsdfRichTextStyle, letterSpacing: number): void {
-        if (this.font !== font) {
-            this.font = font;
-            this.textSprite.resetFont(font);
-        }
-
-        this.textSprite.text = text;
-        this.textSprite.fontSize = style.fontSize;
-        this.textSprite.letterSpacing = letterSpacing;
-        this.textSprite.lineSpacing = 0;
-        this.textSprite.textColor = style.textColor;
-        this.textSprite.outlineColor = style.outlineColor;
-        this.textSprite.outlineWidth = style.outlineWidth;
-        this.textSprite.underline = !!style.underline;
-        this.textSprite.strikethrough = !!style.strikethrough;
-        this.textSprite.refresh();
-
-        const baseWidth = this.textSprite.width;
-        const baseHeight = Math.max(this.textSprite.height, this.font.getLineHeight(style.fontSize));
-        const italicOffset = styleSkewExtra(baseHeight, style);
-        const renderWidth = baseWidth * styleScaleX(style) + italicOffset;
-
-        this.textSprite.pos(style.italic ? italicOffset : 0, 0);
-        this.textSprite.scale(styleScaleX(style), 1);
-        this.textSprite.skew(style.italic ? -ITALIC_SKEW_DEGREES : 0, 0);
-        this.size(renderWidth, baseHeight);
-    }
-}
-
-export class MsdfRichTextSprite extends Laya.Sprite {
-    private readonly runPool: MsdfTextRunSprite[] = [];
-    private readonly activeRuns: MsdfTextRunSprite[] = [];
-
-    private _runs: MsdfRichTextRun[] = [];
-    private _letterSpacing = 0;
-    private _lineSpacing = 0;
-    private _wordWrapWidth = 0;
-    private _layoutWidth = 0;
-    private _defaultAlign = "left";
-    private _contentWidth = 0;
-    private _contentHeight = 0;
-
-    constructor(private font: MsdfBitmapFont) {
-        super();
-        this.mouseThrough = true;
-    }
-
-    get letterSpacing(): number {
-        return this._letterSpacing;
-    }
-
-    set letterSpacing(value: number) {
-        this._letterSpacing = value;
-    }
-
-    get lineSpacing(): number {
-        return this._lineSpacing;
-    }
-
-    set lineSpacing(value: number) {
-        this._lineSpacing = value;
     }
 
     get wordWrapWidth(): number {
@@ -892,27 +728,113 @@ export class MsdfRichTextSprite extends Laya.Sprite {
         return this._contentHeight;
     }
 
+    set textColor(value: Laya.Vector4) {
+        this._textColor = value;
+        if (!this._usesRuns) {
+            if (this._drawBatches[0]) {
+                this._drawBatches[0].textColor = value;
+            }
+            this.redraw();
+        }
+    }
+
+    set outlineColor(value: Laya.Vector4) {
+        this._outlineColor = value;
+        if (!this._usesRuns) {
+            if (this._drawBatches[0]) {
+                this._drawBatches[0].outlineColor = value;
+            }
+            this.redraw();
+        }
+    }
+
+    set outlineWidth(value: number) {
+        this._outlineWidth = value;
+        if (!this._usesRuns) {
+            if (this._drawBatches[0]) {
+                this._drawBatches[0].outlineWidth = value;
+            }
+            this.redraw();
+        }
+    }
+
+    set underline(value: boolean) {
+        if (this._underline === value) {
+            return;
+        }
+        this._underline = value;
+        this.refresh();
+    }
+
+    set strikethrough(value: boolean) {
+        if (this._strikethrough === value) {
+            return;
+        }
+        this._strikethrough = value;
+        this.refresh();
+    }
+
     setRuns(value: MsdfRichTextRun[]): void {
-        this._runs = value;
+        this._usesRuns = true;
+        this._runs = value ? value.slice() : [];
     }
 
     resetFont(font: MsdfBitmapFont): void {
         this.font = font;
+        if (this.useBatchStyleData) {
+            this.materialInstance = this.font.renderState.material;
+            this.material = this.materialInstance;
+        }
+        this.refresh();
     }
 
     refresh(): void {
+        if (this._usesRuns) {
+            this.refreshRichText();
+            return;
+        }
+
+        this._layout = this.font.buildLayout(
+            this._text,
+            this._fontSize,
+            this._letterSpacing,
+            this._lineSpacing,
+            {
+                underline: this._underline,
+                strikethrough: this._strikethrough
+            }
+        );
+        this._contentWidth = this._layout.width;
+        this._contentHeight = this._layout.height;
+        this._drawBatches = this._layout.indices.length > 0
+            ? [{
+                vertices: this._layout.vertices,
+                uvs: this._layout.uvs,
+                indices: this._layout.indices,
+                textColor: this._textColor,
+                outlineColor: this._outlineColor,
+                outlineWidth: this._outlineWidth
+            }]
+            : [];
+        this.size(this._layout.width, this._layout.height);
+        this.redraw();
+    }
+
+    private refreshRichText(): void {
         if (this._runs.length === 0) {
+            this._layout = createEmptyLayout();
+            this._drawBatches = [];
             this._contentWidth = 0;
             this._contentHeight = 0;
-            this.recycleSprites(0);
             this.size(this._layoutWidth, 0);
+            this.redraw();
             return;
         }
 
         const lines = this.layoutRuns();
         const viewWidth = this._layoutWidth > 0 ? this._layoutWidth : this._contentWidth;
+        const drawBatches: MsdfDrawBatch[] = [];
 
-        let spriteCount = 0;
         for (const line of lines) {
             const lineAlign = line.align || this._defaultAlign;
             const lineOffsetX = lineAlign === "center"
@@ -923,15 +845,88 @@ export class MsdfRichTextSprite extends Laya.Sprite {
 
             let cmd = line.cmd;
             while (cmd) {
-                const sprite = this.obtainSprite(spriteCount++);
-                sprite.apply(this.font, cmd.text, cmd.style, this._letterSpacing);
-                sprite.pos(lineOffsetX + cmd.x, line.y + cmd.y);
+                const batch = this.buildRunBatch(cmd, lineOffsetX + cmd.x, line.y + cmd.y);
+                if (batch) {
+                    drawBatches.push(batch);
+                }
                 cmd = cmd.next;
             }
         }
 
-        this.recycleSprites(spriteCount);
+        this._layout = createEmptyLayout();
+        this._drawBatches = drawBatches;
         this.size(viewWidth, this._contentHeight);
+        this.redraw();
+    }
+
+    private syncMaterial(batch: MsdfDrawBatch | null = this._drawBatches[0] ?? null): void {
+        const renderState = this.font.renderState;
+
+        if (this.useBatchStyleData) {
+            if (this.materialInstance !== renderState.material) {
+                this.materialInstance = renderState.material;
+                this.material = this.materialInstance;
+            }
+            return;
+        }
+
+        applyMaterialBase(this.materialInstance, this.font, renderState.styleRegistry, false);
+        this.materialInstance.setVector4("u_TextColor", batch?.textColor ?? this._textColor);
+        this.materialInstance.setVector4("u_OutlineColor", batch?.outlineColor ?? this._outlineColor);
+        this.materialInstance.setFloat("u_OutlineWidth", batch?.outlineWidth ?? this._outlineWidth);
+    }
+
+    private redraw(): void {
+        this.graphics.clear(true);
+
+        if (this._drawBatches.length === 0) {
+            this.syncMaterial();
+            return;
+        }
+
+        const firstBatch = this._drawBatches[0];
+        this.syncMaterial(firstBatch);
+
+        if (!this.useBatchStyleData) {
+            const expectedStyle = renderStyleKey(firstBatch.textColor, firstBatch.outlineColor, firstBatch.outlineWidth);
+            const hasMultiStyle = this._drawBatches.some((batch, index) =>
+                index > 0 && renderStyleKey(batch.textColor, batch.outlineColor, batch.outlineWidth) !== expectedStyle);
+
+            if (hasMultiStyle) {
+                this.reportMultiStyleFallback();
+            }
+        }
+
+        for (const batch of this._drawBatches) {
+            if (this.useBatchStyleData) {
+                const styleIndex = this.font.renderState.styleRegistry.register(batch.textColor, batch.outlineColor);
+                this.graphics.drawTriangles(
+                    this.font.texture,
+                    0,
+                    0,
+                    batch.vertices,
+                    batch.uvs,
+                    batch.indices,
+                    null,
+                    1,
+                    null,
+                    null,
+                    styleIndex,
+                    batch.outlineWidth
+                );
+            } else {
+                this.graphics.drawTriangles(this.font.texture, 0, 0, batch.vertices, batch.uvs, batch.indices);
+            }
+        }
+    }
+
+    private reportMultiStyleFallback(): void {
+        if (this._multiStyleFallbackReported) {
+            return;
+        }
+
+        this._multiStyleFallbackReported = true;
+        console.error("[MsdfTextSprite] rich text with multiple styles requires DrawTriangles STYLE_PAYLOAD_VERSION >= 1; rendering with the first style only.");
     }
 
     private layoutRuns(): MsdfRichTextLine[] {
@@ -1299,26 +1294,43 @@ export class MsdfRichTextSprite extends Laya.Sprite {
         return lines;
     }
 
-    private obtainSprite(index: number): MsdfTextRunSprite {
-        let sprite = this.activeRuns[index];
-        if (!sprite) {
-            sprite = this.runPool.pop() ?? new MsdfTextRunSprite(this.font);
-            this.activeRuns[index] = sprite;
+    private buildRunBatch(cmd: MsdfRichTextCommand, x: number, y: number): MsdfDrawBatch | null {
+        const style = cmd.style;
+        const layout = this.font.buildLayout(
+            cmd.text,
+            style.fontSize,
+            this._letterSpacing,
+            0,
+            {
+                underline: !!style.underline,
+                strikethrough: !!style.strikethrough
+            }
+        );
+
+        if (layout.indices.length === 0) {
+            return null;
         }
 
-        if (sprite.parent !== this) {
-            this.addChild(sprite);
+        const baseHeight = Math.max(layout.height, this.font.getLineHeight(style.fontSize));
+        const italicOffset = styleSkewExtra(baseHeight, style);
+        const scaleX = styleScaleX(style);
+        const skewX = style.italic ? Math.tan(ITALIC_SKEW_DEGREES * Math.PI / 180) : 0;
+        const vertices = new Float32Array(layout.vertices.length);
+
+        for (let i = 0; i < layout.vertices.length; i += 2) {
+            const localX = layout.vertices[i] * scaleX;
+            const localY = layout.vertices[i + 1];
+            vertices[i] = x + localX + (style.italic ? italicOffset - skewX * localY : 0);
+            vertices[i + 1] = y + localY;
         }
 
-        return sprite;
-    }
-
-    private recycleSprites(usedCount: number): void {
-        for (let i = this.activeRuns.length - 1; i >= usedCount; i--) {
-            const sprite = this.activeRuns[i];
-            sprite.removeSelf();
-            this.runPool.push(sprite);
-            this.activeRuns.pop();
-        }
+        return {
+            vertices,
+            uvs: layout.uvs,
+            indices: layout.indices,
+            textColor: style.textColor,
+            outlineColor: style.outlineColor,
+            outlineWidth: style.outlineWidth
+        };
     }
 }
