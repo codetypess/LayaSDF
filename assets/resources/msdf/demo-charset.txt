@@ -1,5 +1,5 @@
 繁鼻我们影响沉浸MSDF文字演示描边阴影0123456789MSDFLabel 组件支持基础对齐、描边和自动换行测试描边对比：统一 stroke = 3，观察 20 / 25 / 30 / 35 / 40 / 45px.
-+const rich = new MsdfLabel("支持 <font color=\"#f9e38f\" size=\"36\">HTML</font>、<i>斜体</i>、<u>下划线</u>");
++const rich = new MsdfLabel("支持 <font color=\"#f9e38f\" size=\"36\">HTML</font>、<i>斜体</i>、<u>下划线</u>")_;
     59 +rich.html = true;
     60 +-
     61 +const ubb = new MsdfLabel("[color=#7dd3fc]UBB[/color] [u]也可用[/u]");

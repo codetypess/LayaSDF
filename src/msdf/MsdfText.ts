@@ -49,6 +49,21 @@ type MsdfTextOptions = {
     textColor?: Laya.Vector4;
     outlineColor?: Laya.Vector4;
     outlineWidth?: number;
+    underline?: boolean;
+    strikethrough?: boolean;
+};
+
+type MsdfDecorationOptions = {
+    underline?: boolean;
+    strikethrough?: boolean;
+};
+
+type MsdfDecorationRenderMetrics = {
+    leftOverhang: number;
+    rightOverhang: number;
+    underlineTop: number;
+    underlineBottom: number;
+    thickness: number;
 };
 
 export type MsdfRichTextStyle = {
@@ -61,9 +76,7 @@ export type MsdfRichTextStyle = {
     bold?: boolean;
     italic?: boolean;
     underline?: boolean;
-    underlineColorCss?: string | null;
     strikethrough?: boolean;
-    strikethroughColorCss?: string | null;
     align?: string | null;
 };
 
@@ -98,6 +111,13 @@ const STYLE_TEXTURE_WIDTH = 256;
 const STYLE_TEXTURE_HEIGHT = 2;
 const ITALIC_SKEW_DEGREES = 12;
 const BOLD_SCALE_X = 1.04;
+const LARGE_DECORATION_SCALE_THRESHOLD = 1.75;
+const LARGE_DECORATION_THICKNESS_BOOST = 1;
+const UNDERLINE_EXTRA_OFFSET_MIN = 0.75;
+const UNDERLINE_EXTRA_OFFSET_SCALE = 0.55;
+// Keep this in sync with scripts/msdf-decoration.mjs.
+const DECORATION_SOURCE_CHAR_CODE = 0xe000;
+const DECORATION_SOURCE_CHAR = String.fromCodePoint(DECORATION_SOURCE_CHAR_CODE);
 const emojiTest = /[\uD800-\uDBFF][\uDC00-\uDFFF]/;
 const wordBoundaryTest = /[a-zA-Z0-9\!-\+\/_]+$/;
 const punctuationChars = Array.from(".,，。、!！；;”’)）]】}》").map(char => char.charCodeAt(0));
@@ -248,7 +268,9 @@ export class MsdfBitmapFont {
 
     private readonly glyphs = new Map<string, MsdfGlyph>();
     private readonly kernings = new Map<string, number>();
+    private readonly decorationGlyph: MsdfGlyph | null = null;
     private _renderState: MsdfFontRenderState | null = null;
+    private _missingDecorationGlyphReported = false;
 
     static fromResources(texture: Laya.Texture, rawData: any): MsdfBitmapFont {
         return new MsdfBitmapFont(texture, normalizeFontJson(rawData));
@@ -280,6 +302,8 @@ export class MsdfBitmapFont {
         for (const glyph of data.chars) {
             this.glyphs.set(glyph.char, glyph);
         }
+
+        this.decorationGlyph = this.glyphs.get(DECORATION_SOURCE_CHAR) ?? null;
 
         for (const kerning of data.kernings ?? []) {
             this.kernings.set(kerningKey(kerning.first, kerning.second), kerning.amount);
@@ -328,6 +352,39 @@ export class MsdfBitmapFont {
         return Math.max(widestLine, penX);
     }
 
+    getDecorationRenderMetrics(fontSize: number): MsdfDecorationRenderMetrics | null {
+        if (!this.decorationGlyph) {
+            return null;
+        }
+
+        const scale = fontSize / this.lineHeight;
+        const baseThickness = Math.max(1, Math.ceil(this.decorationGlyph.height * scale));
+        const thickness = scale >= LARGE_DECORATION_SCALE_THRESHOLD
+            ? baseThickness + LARGE_DECORATION_THICKNESS_BOOST
+            : baseThickness;
+        const leftOverhang = Math.min(0, this.decorationGlyph.xoffset * scale);
+        const rightOverhang = Math.max(0, (this.decorationGlyph.xoffset + this.decorationGlyph.width - this.decorationGlyph.xadvance) * scale);
+        const underlineOffset = Math.max(UNDERLINE_EXTRA_OFFSET_MIN, scale * UNDERLINE_EXTRA_OFFSET_SCALE);
+        const underlineTop = Math.round(this.decorationGlyph.yoffset * scale + underlineOffset);
+
+        return {
+            leftOverhang,
+            rightOverhang,
+            underlineTop,
+            underlineBottom: underlineTop + thickness,
+            thickness
+        };
+    }
+
+    private reportMissingDecorationGlyph(): void {
+        if (this._missingDecorationGlyphReported) {
+            return;
+        }
+
+        this._missingDecorationGlyphReported = true;
+        console.error(`[MsdfBitmapFont] decoration glyph U+${DECORATION_SOURCE_CHAR_CODE.toString(16).toUpperCase()} is missing from the atlas; underline/strikethrough will not render.`);
+    }
+
     wrapText(text: string, fontSize: number, maxWidth: number, letterSpacing: number = 0): string {
         if (maxWidth <= 0) {
             return text;
@@ -367,11 +424,20 @@ export class MsdfBitmapFont {
         return result;
     }
 
-    buildLayout(text: string, fontSize: number, letterSpacing: number = 0, lineSpacing: number = 0): MsdfLayout {
+    buildLayout(text: string, fontSize: number, letterSpacing: number = 0, lineSpacing: number = 0, decorations: MsdfDecorationOptions = {}): MsdfLayout {
         const scale = fontSize / this.lineHeight;
         const vertices: number[] = [];
         const uvs: number[] = [];
         const indices: number[] = [];
+        const lineHeight = this.lineHeight * scale;
+        const lineInfos: Array<{ y: number; advanceWidth: number; left: number; right: number; }> = [
+            {
+                y: 0,
+                advanceWidth: 0,
+                left: Number.POSITIVE_INFINITY,
+                right: Number.NEGATIVE_INFINITY
+            }
+        ];
 
         let penX = 0;
         let penY = 0;
@@ -384,35 +450,9 @@ export class MsdfBitmapFont {
         let currentLineWidth = 0;
         let widestLine = 0;
         let previousCode = -1;
+        let lineIndex = 0;
 
-        for (const char of text) {
-            if (char === "\n") {
-                widestLine = Math.max(widestLine, currentLineWidth);
-                currentLineWidth = 0;
-                penX = 0;
-                penY += this.lineHeight * scale + lineSpacing;
-                previousCode = -1;
-                lineCount += 1;
-                continue;
-            }
-
-            const glyph = this.glyphs.get(char);
-            if (!glyph) {
-                penX += fontSize * 0.5;
-                currentLineWidth = Math.max(currentLineWidth, penX);
-                previousCode = -1;
-                continue;
-            }
-
-            if (previousCode >= 0) {
-                penX += (this.kernings.get(kerningKey(previousCode, glyph.id)) ?? 0) * scale;
-            }
-
-            const left = penX + glyph.xoffset * scale;
-            const top = penY + glyph.yoffset * scale;
-            const right = left + glyph.width * scale;
-            const bottom = top + glyph.height * scale;
-
+        const pushQuad = (glyph: MsdfGlyph, left: number, top: number, right: number, bottom: number): void => {
             const u0 = glyph.x / this.atlasWidth;
             const v0 = glyph.y / this.atlasHeight;
             const u1 = (glyph.x + glyph.width) / this.atlasWidth;
@@ -442,14 +482,91 @@ export class MsdfBitmapFont {
             minY = Math.min(minY, top);
             maxX = Math.max(maxX, right);
             maxY = Math.max(maxY, bottom);
+            quadCount += 1;
+        };
+
+        for (const char of text) {
+            if (char === "\n") {
+                widestLine = Math.max(widestLine, currentLineWidth);
+                lineInfos[lineIndex].advanceWidth = currentLineWidth;
+                currentLineWidth = 0;
+                penX = 0;
+                penY += lineHeight + lineSpacing;
+                previousCode = -1;
+                lineCount += 1;
+                lineIndex += 1;
+                lineInfos.push({
+                    y: penY,
+                    advanceWidth: 0,
+                    left: Number.POSITIVE_INFINITY,
+                    right: Number.NEGATIVE_INFINITY
+                });
+                continue;
+            }
+
+            const glyph = this.glyphs.get(char);
+            if (!glyph) {
+                penX += fontSize * 0.5;
+                currentLineWidth = Math.max(currentLineWidth, penX);
+                previousCode = -1;
+                continue;
+            }
+
+            if (previousCode >= 0) {
+                penX += (this.kernings.get(kerningKey(previousCode, glyph.id)) ?? 0) * scale;
+            }
+
+            const left = penX + glyph.xoffset * scale;
+            const top = penY + glyph.yoffset * scale;
+            const right = left + glyph.width * scale;
+            const bottom = top + glyph.height * scale;
+            const line = lineInfos[lineIndex];
+
+            line.left = Math.min(line.left, left);
+            line.right = Math.max(line.right, right);
+
+            pushQuad(glyph, left, top, right, bottom);
 
             penX += (glyph.xadvance + letterSpacing) * scale;
             currentLineWidth = Math.max(currentLineWidth, penX);
             previousCode = glyph.id;
-            quadCount += 1;
         }
 
         widestLine = Math.max(widestLine, currentLineWidth);
+        lineInfos[lineIndex].advanceWidth = currentLineWidth;
+
+        if (decorations.underline || decorations.strikethrough) {
+            const decorationGlyph = this.decorationGlyph;
+            const decorationMetrics = this.getDecorationRenderMetrics(fontSize);
+
+            if (!decorationGlyph || !decorationMetrics) {
+                this.reportMissingDecorationGlyph();
+            } else {
+                for (const line of lineInfos) {
+                    const lineLeft = Number.isFinite(line.left)
+                        ? Math.min(0, line.left, decorationMetrics.leftOverhang)
+                        : decorationMetrics.leftOverhang;
+                    const lineRight = Math.max(
+                        line.advanceWidth + decorationMetrics.rightOverhang,
+                        Number.isFinite(line.right) ? line.right : 0
+                    );
+
+                    if (lineRight <= lineLeft) {
+                        continue;
+                    }
+
+                    if (decorations.underline) {
+                        const top = line.y + decorationMetrics.underlineTop;
+                        pushQuad(decorationGlyph, lineLeft, top, lineRight, top + decorationMetrics.thickness);
+                    }
+
+                    if (decorations.strikethrough) {
+                        const top = line.y + lineHeight * 0.5 - decorationMetrics.thickness * 0.5;
+                        pushQuad(decorationGlyph, lineLeft, top, lineRight, top + decorationMetrics.thickness);
+                    }
+                }
+            }
+        }
 
         if (quadCount === 0) {
             return {
@@ -457,11 +574,11 @@ export class MsdfBitmapFont {
                 uvs: new Float32Array(0),
                 indices: new Uint16Array(0),
                 width: widestLine,
-                height: lineCount * this.lineHeight * scale + Math.max(0, lineCount - 1) * lineSpacing
+                height: lineCount * lineHeight + Math.max(0, lineCount - 1) * lineSpacing
             };
         }
 
-        maxY = Math.max(maxY, lineCount * this.lineHeight * scale + Math.max(0, lineCount - 1) * lineSpacing);
+        maxY = Math.max(maxY, lineCount * lineHeight + Math.max(0, lineCount - 1) * lineSpacing);
 
         const shiftY = minY < 0 ? minY : 0;
 
@@ -475,7 +592,7 @@ export class MsdfBitmapFont {
             uvs: new Float32Array(uvs),
             indices: new Uint16Array(indices),
             width: Math.max(widestLine, maxX - minX),
-            height: Math.max(lineCount * this.lineHeight * scale + Math.max(0, lineCount - 1) * lineSpacing, maxY - shiftY)
+            height: Math.max(lineCount * lineHeight + Math.max(0, lineCount - 1) * lineSpacing, maxY - shiftY)
         };
     }
 }
@@ -491,6 +608,8 @@ export class MsdfTextSprite extends Laya.Sprite {
     private _textColor: Laya.Vector4;
     private _outlineColor: Laya.Vector4;
     private _outlineWidth: number;
+    private _underline: boolean;
+    private _strikethrough: boolean;
     private _layout: MsdfLayout = createEmptyLayout();
     private _styleIndex = 0;
 
@@ -504,6 +623,8 @@ export class MsdfTextSprite extends Laya.Sprite {
         this._textColor = options.textColor ?? DEFAULT_TEXT_COLOR.clone();
         this._outlineColor = options.outlineColor ?? DEFAULT_OUTLINE_COLOR.clone();
         this._outlineWidth = options.outlineWidth ?? 0;
+        this._underline = !!options.underline;
+        this._strikethrough = !!options.strikethrough;
         this.useBatchStyleData = supportsMsdfBatchStyle();
 
         this.materialInstance = this.useBatchStyleData
@@ -579,6 +700,22 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
     }
 
+    set underline(value: boolean) {
+        if (this._underline === value) {
+            return;
+        }
+        this._underline = value;
+        this.refresh();
+    }
+
+    set strikethrough(value: boolean) {
+        if (this._strikethrough === value) {
+            return;
+        }
+        this._strikethrough = value;
+        this.refresh();
+    }
+
     resetFont(font: MsdfBitmapFont): void {
         this.font = font;
         if (this.useBatchStyleData) {
@@ -590,7 +727,16 @@ export class MsdfTextSprite extends Laya.Sprite {
     }
 
     refresh(): void {
-        this._layout = this.font.buildLayout(this._text, this._fontSize, this._letterSpacing, this._lineSpacing);
+        this._layout = this.font.buildLayout(
+            this._text,
+            this._fontSize,
+            this._letterSpacing,
+            this._lineSpacing,
+            {
+                underline: this._underline,
+                strikethrough: this._strikethrough
+            }
+        );
         this.redraw();
     }
 
@@ -664,6 +810,8 @@ class MsdfTextRunSprite extends Laya.Sprite {
         this.textSprite.textColor = style.textColor;
         this.textSprite.outlineColor = style.outlineColor;
         this.textSprite.outlineWidth = style.outlineWidth;
+        this.textSprite.underline = !!style.underline;
+        this.textSprite.strikethrough = !!style.strikethrough;
         this.textSprite.refresh();
 
         const baseWidth = this.textSprite.width;
@@ -674,28 +822,7 @@ class MsdfTextRunSprite extends Laya.Sprite {
         this.textSprite.pos(style.italic ? italicOffset : 0, 0);
         this.textSprite.scale(styleScaleX(style), 1);
         this.textSprite.skew(style.italic ? -ITALIC_SKEW_DEGREES : 0, 0);
-
-        this.drawDecorations(style, renderWidth, baseHeight);
         this.size(renderWidth, baseHeight);
-    }
-
-    private drawDecorations(style: MsdfRichTextStyle, width: number, height: number): void {
-        this.graphics.clear();
-
-        if (width <= 0 || height <= 0) {
-            return;
-        }
-
-        const thickness = Math.max(1, style.fontSize / 16);
-
-        if (style.underline) {
-            this.graphics.drawLine(0, height - thickness, width, height - thickness, style.underlineColorCss || style.textColorCss, thickness);
-        }
-
-        if (style.strikethrough) {
-            const strikeY = (height * 0.5 - thickness) | 0;
-            this.graphics.drawLine(-4, strikeY, width + 4, strikeY, style.strikethroughColorCss || style.textColorCss, thickness);
-        }
     }
 }
 
@@ -819,24 +946,52 @@ export class MsdfRichTextSprite extends Laya.Sprite {
         let currentLine: MsdfRichTextLine | null = null;
         let lastCmd: MsdfRichTextCommand | null = null;
 
-        const getTextWidth = (text: string, style: MsdfRichTextStyle): number => {
-            const baseWidth = this.font.measureTextWidth(text, style.fontSize, this._letterSpacing);
-            const baseHeight = this.font.getLineHeight(style.fontSize);
-            return baseWidth * styleScaleX(style) + styleSkewExtra(baseHeight, style);
+        const getStyleRenderMetrics = (style: MsdfRichTextStyle): { extraWidth: number; height: number; } => {
+            const lineHeight = this.font.getLineHeight(style.fontSize);
+            let renderHeight = lineHeight;
+            let extraWidth = 0;
+
+            if (style.underline || style.strikethrough) {
+                const decorationMetrics = this.font.getDecorationRenderMetrics(style.fontSize);
+
+                if (decorationMetrics) {
+                    extraWidth = -decorationMetrics.leftOverhang + decorationMetrics.rightOverhang;
+
+                    if (style.underline) {
+                        renderHeight = Math.max(renderHeight, decorationMetrics.underlineBottom);
+                    }
+
+                    if (style.strikethrough) {
+                        renderHeight = Math.max(renderHeight, lineHeight * 0.5 + decorationMetrics.thickness * 0.5);
+                    }
+                }
+            }
+
+            return { extraWidth, height: renderHeight };
         };
 
-        const addCmd = (text: string, style: MsdfRichTextStyle, width?: number): void => {
+        const getTextMetrics = (text: string, style: MsdfRichTextStyle): { width: number; height: number; } => {
+            const styleMetrics = getStyleRenderMetrics(style);
+            const baseWidth = this.font.measureTextWidth(text, style.fontSize, this._letterSpacing) + styleMetrics.extraWidth;
+            return {
+                width: baseWidth * styleScaleX(style) + styleSkewExtra(styleMetrics.height, style),
+                height: styleMetrics.height
+            };
+        };
+
+        const addCmd = (text: string, style: MsdfRichTextStyle, metrics?: { width: number; height: number; }): void => {
             if (!text) {
                 return;
             }
 
-            const cmdHeight = Math.max(this.font.getLineHeight(style.fontSize), 1);
+            const resolvedMetrics = metrics ?? getTextMetrics(text, style);
+            const cmdHeight = Math.max(resolvedMetrics.height, 1);
             const cmd: MsdfRichTextCommand = {
                 text,
                 style,
                 x: lineX,
                 y: 0,
-                width: width ?? getTextWidth(text, style),
+                width: resolvedMetrics.width,
                 height: cmdHeight,
                 next: null,
                 prev: lastCmd
@@ -919,14 +1074,14 @@ export class MsdfRichTextSprite extends Laya.Sprite {
 
             const tail = cmd.text.substring(pos);
             cmd.text = cmd.text.substring(0, pos);
-            cmd.width = getTextWidth(cmd.text, cmd.style);
+            cmd.width = getTextMetrics(cmd.text, cmd.style).width;
 
             const nextCmd: MsdfRichTextCommand = {
                 text: tail,
                 style: cmd.style,
                 x: 0,
                 y: 0,
-                width: getTextWidth(tail, cmd.style),
+                width: getTextMetrics(tail, cmd.style).width,
                 height: cmd.height,
                 next: cmd.next,
                 prev: cmd
@@ -971,17 +1126,19 @@ export class MsdfRichTextSprite extends Laya.Sprite {
 
         const wrapText = (text: string, style: MsdfRichTextStyle): void => {
             let remainWidth = Math.max(0, rectWidth - lineX);
-            let totalWidth = getTextWidth(text, style);
-            const italicExtra = styleSkewExtra(this.font.getLineHeight(style.fontSize), style);
+            const styleMetrics = getStyleRenderMetrics(style);
+            const totalMetrics = getTextMetrics(text, style);
+            let totalWidth = totalMetrics.width;
+            const italicExtra = styleSkewExtra(styleMetrics.height, style);
             const getCharWidth = (charText: string): number => this.font.measureTextWidth(charText, style.fontSize, this._letterSpacing) * styleScaleX(style);
 
             if (totalWidth <= remainWidth) {
-                addCmd(text, style, totalWidth);
+                addCmd(text, style, totalMetrics);
                 return;
             }
 
             let startIndex = 0;
-            let wordWidth = italicExtra;
+            let wordWidth = italicExtra + styleMetrics.extraWidth;
             let isPunctuation = false;
             let match: RegExpExecArray | null = null;
             const emoji = emojiTest.test(text);
@@ -1013,7 +1170,7 @@ export class MsdfRichTextSprite extends Laya.Sprite {
                         if (wordBoundary > part.length - maxWordLength) {
                             j = startIndex + wordBoundary;
                             part = text.substring(startIndex, j);
-                            wordWidth = getTextWidth(part, style);
+                            wordWidth = getTextMetrics(part, style).width;
                             charWidth = null;
                         }
                     } else if (wordBoundary != null && lastCmd != null) {
@@ -1070,20 +1227,20 @@ export class MsdfRichTextSprite extends Laya.Sprite {
                         if (j - backup > startIndex || lineX > 0) {
                             j -= backup;
                             part = text.substring(startIndex, j);
-                            wordWidth = getTextWidth(part, style);
+                            wordWidth = getTextMetrics(part, style).width;
                             charWidth = null;
                         }
                     }
                 }
 
                 if (part.length > 0) {
-                    addCmd(part, style, wordWidth);
+                    addCmd(part, style, { width: wordWidth, height: styleMetrics.height });
                 }
 
                 addLine();
                 startIndex = j;
                 remainWidth = rectWidth;
-                wordWidth = italicExtra;
+                wordWidth = italicExtra + styleMetrics.extraWidth;
 
                 if (charWidth != null) {
                     wordWidth += charWidth;
@@ -1095,7 +1252,7 @@ export class MsdfRichTextSprite extends Laya.Sprite {
                 }
 
                 if (charWidth == null && j < len - 1) {
-                    wordWidth = getTextWidth(text.substring(startIndex, j + 1), style);
+                    wordWidth = getTextMetrics(text.substring(startIndex, j + 1), style).width;
                 }
             }
 
@@ -1109,7 +1266,7 @@ export class MsdfRichTextSprite extends Laya.Sprite {
                 continue;
             }
 
-            lastHeight = this.font.getLineHeight(run.style.fontSize);
+            lastHeight = getStyleRenderMetrics(run.style).height;
             const splitLines = run.text.split("\n");
 
             for (let i = 0, n = splitLines.length; i < n; i++) {

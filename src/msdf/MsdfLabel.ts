@@ -52,9 +52,7 @@ function sameRichStyle(left: MsdfRichTextStyle, right: MsdfRichTextStyle): boole
         && !!left.bold === !!right.bold
         && !!left.italic === !!right.italic
         && !!left.underline === !!right.underline
-        && (left.underlineColorCss ?? "") === (right.underlineColorCss ?? "")
         && !!left.strikethrough === !!right.strikethrough
-        && (left.strikethroughColorCss ?? "") === (right.strikethroughColorCss ?? "")
         && (left.align ?? "") === (right.align ?? "");
 }
 
@@ -81,6 +79,10 @@ export class MsdfLabel extends Laya.UIComponent {
     private _bgColor = "";
     private _borderColor = "";
     private _wordWrap = false;
+    private _bold = false;
+    private _italic = false;
+    private _underline = false;
+    private _strikethrough = false;
     private _html = false;
     private _ubb = false;
 
@@ -267,6 +269,58 @@ export class MsdfLabel extends Laya.UIComponent {
         this.callLater(this.changeText);
     }
 
+    get bold(): boolean {
+        return this._bold;
+    }
+
+    set bold(value: boolean) {
+        const next = !!value;
+        if (this._bold === next) {
+            return;
+        }
+        this._bold = next;
+        this.callLater(this.changeText);
+    }
+
+    get italic(): boolean {
+        return this._italic;
+    }
+
+    set italic(value: boolean) {
+        const next = !!value;
+        if (this._italic === next) {
+            return;
+        }
+        this._italic = next;
+        this.callLater(this.changeText);
+    }
+
+    get underline(): boolean {
+        return this._underline;
+    }
+
+    set underline(value: boolean) {
+        const next = !!value;
+        if (this._underline === next) {
+            return;
+        }
+        this._underline = next;
+        this.callLater(this.changeText);
+    }
+
+    get strikethrough(): boolean {
+        return this._strikethrough;
+    }
+
+    set strikethrough(value: boolean) {
+        const next = !!value;
+        if (this._strikethrough === next) {
+            return;
+        }
+        this._strikethrough = next;
+        this.callLater(this.changeText);
+    }
+
     get html(): boolean {
         return this._html;
     }
@@ -406,11 +460,11 @@ export class MsdfLabel extends Laya.UIComponent {
 
         style.fontSize = this._fontSize;
         style.color = this._color;
-        style.bold = false;
-        style.italic = false;
-        style.underline = false;
+        style.bold = this._bold;
+        style.italic = this._italic;
+        style.underline = this._underline;
         style.underlineColor = null;
-        style.strikethrough = false;
+        style.strikethrough = this._strikethrough;
         style.strikethroughColor = null;
         style.align = this._align;
         style.valign = this._valign;
@@ -424,8 +478,6 @@ export class MsdfLabel extends Laya.UIComponent {
     private toRichTextStyle(style: any): MsdfRichTextStyle {
         const textColorCss = normalizeColor(style?.color, this._color);
         const outlineColorCss = normalizeColor(style?.strokeColor, this._strokeColor);
-        const underlineColorCss = style?.underlineColor ? normalizeColor(style.underlineColor, textColorCss) : null;
-        const strikethroughColorCss = style?.strikethroughColor ? normalizeColor(style.strikethroughColor, textColorCss) : null;
         const strokeValue = style?.stroke;
         const outlineWidth = typeof strokeValue === "number"
             ? strokeValue
@@ -441,9 +493,7 @@ export class MsdfLabel extends Laya.UIComponent {
             bold: !!style?.bold,
             italic: !!style?.italic,
             underline: !!style?.underline,
-            underlineColorCss,
             strikethrough: !!style?.strikethrough,
-            strikethroughColorCss,
             align: style?.align || this._align
         };
     }

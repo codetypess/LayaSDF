@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
+import { injectDecorationGlyph } from "./msdf-decoration.mjs";
 
 function printHelp() {
     console.log(`Usage:
@@ -94,7 +95,12 @@ if (result.status !== 0) {
 
 renameSync(generatedTexture, textureOut);
 renameSync(generatedJson, jsonOut);
-rmSync(tmpRoot, { recursive: true, force: true });
+
+try {
+    injectDecorationGlyph({ texturePath: textureOut, jsonPath: jsonOut });
+} finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+}
 
 console.log(`Wrote atlas: ${textureOut}`);
 console.log(`Wrote font json: ${jsonOut}`);

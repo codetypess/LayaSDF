@@ -73,6 +73,8 @@ export class Main extends Laya.Script {
         sample.color = "#bae7fa";
         sample.strokeColor = strokeColor;
         sample.stroke = stroke;
+        sample.underline = true;
+        sample.bold = true;
         return sample;
     }
 
