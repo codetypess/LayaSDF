@@ -32283,12 +32283,14 @@ declare module Laya {
         fillColors: Uint32Array;
         outlineColors: Uint32Array;
         outlineParams: Float32Array;
+        glowColors: Uint32Array;
+        glowParams: Float32Array;
         matrix: Matrix | null;
         alpha: number;
         blendMode: string | null;
         color: number | number[] | null;
         drawTriUseAbsMatrix: boolean;
-        static create(texture: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, fillColors: Uint32Array, outlineColors: Uint32Array, outlineParams: Float32Array, matrix: Matrix | null, alpha: number, color: string | number | number[], blendMode: string | null): DrawTrianglesMSDFCmd;
+        static create(texture: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, fillColors: Uint32Array, outlineColors: Uint32Array, outlineParams: Float32Array, glowColors: Uint32Array, glowParams: Float32Array, matrix: Matrix | null, alpha: number, color: string | number | number[], blendMode: string | null): DrawTrianglesMSDFCmd;
         recover(): void;
         run(context: Context, gx: number, gy: number): void;
         get cmdID(): string;
@@ -33544,8 +33546,8 @@ declare module Laya {
         */
         drawTriangles(texture: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, matrix?: Matrix | null, alpha?: number, color?: string | number | number[], blendMode?: string | null): DrawTrianglesCmd;
         drawTrianglesAbs(texture: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, matrix: Matrix, alpha?: number, color?: string | number | number[], blendMode?: string | null): DrawTrianglesCmd;
-        drawTrianglesMSDF(texture: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, fillColors: Uint32Array, outlineColors: Uint32Array, outlineParams: Float32Array, matrix?: Matrix | null, alpha?: number, color?: string | number | number[], blendMode?: string | null): DrawTrianglesMSDFCmd;
-        drawTrianglesAbsMSDF(texture: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, fillColors: Uint32Array, outlineColors: Uint32Array, outlineParams: Float32Array, matrix: Matrix, alpha?: number, color?: string | number | number[], blendMode?: string | null): DrawTrianglesMSDFCmd;
+        drawTrianglesMSDF(texture: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, fillColors: Uint32Array, outlineColors: Uint32Array, outlineParams: Float32Array, glowColors: Uint32Array, glowParams: Float32Array, matrix?: Matrix | null, alpha?: number, color?: string | number | number[], blendMode?: string | null): DrawTrianglesMSDFCmd;
+        drawTrianglesAbsMSDF(texture: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, fillColors: Uint32Array, outlineColors: Uint32Array, outlineParams: Float32Array, glowColors: Uint32Array, glowParams: Float32Array, matrix: Matrix, alpha?: number, color?: string | number | number[], blendMode?: string | null): DrawTrianglesMSDFCmd;
         /**
          * @zh 用纹理填充
          * @param texture 用于填充的纹理
@@ -73648,9 +73650,9 @@ declare module Laya {
             number
         ][], x: number, y: number): void;
         drawTrianglesAbs(tex: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, matrix: Matrix, alpha: number | null, blendMode: string, colorNum?: number | number[]): void;
-        drawTrianglesAbsMSDF(tex: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, fillColors: Uint32Array, outlineColors: Uint32Array, outlineParams: Float32Array, matrix: Matrix, alpha: number | null, blendMode: string, colorNum?: number | number[]): void;
+        drawTrianglesAbsMSDF(tex: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, fillColors: Uint32Array, outlineColors: Uint32Array, outlineParams: Float32Array, glowColors: Uint32Array, glowParams: Float32Array, matrix: Matrix, alpha: number | null, blendMode: string, colorNum?: number | number[]): void;
         drawTriangles(tex: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, matrix: Matrix, alpha: number | null, blendMode: string, colorNum?: number | number[]): void;
-        drawTrianglesMSDF(tex: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, fillColors: Uint32Array, outlineColors: Uint32Array, outlineParams: Float32Array, matrix: Matrix, alpha: number | null, blendMode: string, colorNum?: number | number[]): void;
+        drawTrianglesMSDF(tex: Texture, x: number, y: number, vertices: Float32Array, uvs: Float32Array, indices: Uint16Array, fillColors: Uint32Array, outlineColors: Uint32Array, outlineParams: Float32Array, glowColors: Uint32Array, glowParams: Float32Array, matrix: Matrix, alpha: number | null, blendMode: string, colorNum?: number | number[]): void;
         transform(a: number, b: number, c: number, d: number, tx: number, ty: number): void;
         rotate(angle: number): void;
         scale(scaleX: number, scaleY: number): void;
@@ -90737,7 +90739,7 @@ declare module Laya {
         constructor();
         protected onVBRealloc(buff: ArrayBuffer): void;
         protected onIBRealloc(buff: ArrayBuffer): void;
-        addData(vertices: Float32Array, uvs: Float32Array, idx: Uint16Array, matrix: Matrix, abgr: number | number[], fillColors: Uint32Array, outlineColors: Uint32Array, outlineParams: Float32Array, uvrect?: number[]): void;
+        addData(vertices: Float32Array, uvs: Float32Array, idx: Uint16Array, matrix: Matrix, abgr: number | number[], fillColors: Uint32Array, outlineColors: Uint32Array, outlineParams: Float32Array, glowColors: Uint32Array, glowParams: Float32Array, uvrect?: number[]): void;
         get vertexDeclarition(): VertexDeclaration;
     }
     /**

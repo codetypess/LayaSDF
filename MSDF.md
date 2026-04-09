@@ -19,6 +19,8 @@ label.fontSize = 32;
 label.color = "#ffffff";
 label.stroke = 1.5;
 label.strokeColor = "#000000";
+label.glow = 6;
+label.glowColor = "#7dd3fc99";
 label.wordWrap = true;
 label.leading = 8;
 label.letterSpacing = 1;
@@ -40,6 +42,8 @@ Supported common properties:
 - `color`
 - `stroke`
 - `strokeColor`
+- `glow`
+- `glowColor`
 - `wordWrap`
 - `leading`
 - `letterSpacing`

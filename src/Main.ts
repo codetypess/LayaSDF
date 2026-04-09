@@ -15,6 +15,8 @@ export class Main extends Laya.Script {
         title.color = "#f9e38f";
         title.strokeColor = "#0d906b";
         title.stroke = 4;
+        title.glow = 5;
+        title.glowColor = "#e5e830cc";
         title.pos(80, 30);
         this.owner.addChild(title);
 
@@ -46,7 +48,9 @@ export class Main extends Laya.Script {
         wrapped.fontSize = 28;
         wrapped.color = "#dbe8f2";
         wrapped.strokeColor = "#11212e";
-        wrapped.stroke = 1.2;
+        wrapped.stroke = 1.2
+        wrapped.glow = 2;
+        wrapped.glowColor = "#ff4000";
         wrapped.bgColor = "#1a2736";
         wrapped.borderColor = "#3b546d";
         wrapped.wordWrap = true;

@@ -28586,6 +28586,29 @@
     RandX._CONVERTION_BUFFER = new DataView(new ArrayBuffer(8));
     RandX.defaultRand = new RandX([0, Date.now() / 65536, 0, Date.now() % 65536]);
 
+    class TextMesh {
+        get text() {
+            return this._text;
+        }
+        set text(value) {
+            this._text = value;
+        }
+        get fontSize() {
+            return this._fontSize;
+        }
+        set fontSize(value) {
+            this._fontSize = value;
+        }
+        get color() {
+            return this._color;
+        }
+        set color(value) {
+            this._color = value;
+        }
+        constructor() {
+        }
+    }
+
     exports.ShadowLightType = void 0;
     (function (ShadowLightType) {
         ShadowLightType[ShadowLightType["DirectionLight"] = 0] = "DirectionLight";
@@ -28651,29 +28674,6 @@
             this.cameraShaderValue.destroy();
             this.cameraShaderValue = null;
             this.cullPlanes = null;
-        }
-    }
-
-    class TextMesh {
-        get text() {
-            return this._text;
-        }
-        set text(value) {
-            this._text = value;
-        }
-        get fontSize() {
-            return this._fontSize;
-        }
-        set fontSize(value) {
-            this._fontSize = value;
-        }
-        get color() {
-            return this._color;
-        }
-        set color(value) {
-            this._color = value;
-        }
-        constructor() {
         }
     }
 
@@ -29183,6 +29183,656 @@
             return pass;
         }
     }
+
+    class WebXRCamera extends Camera {
+        constructor() {
+            super(...arguments);
+            this.isWebXR = true;
+        }
+        get renderTarget() {
+            return this._internalRenderTexture;
+        }
+        set renderTarget(value) {
+            this._internalRenderTexture = value;
+        }
+        set clientWidth(value) {
+            this._clientWidth = value;
+        }
+        set clientHeight(value) {
+            this._clientHeight = value;
+        }
+        get clientWidth() {
+            return this._clientWidth;
+        }
+        get clientHeight() {
+            return this._clientHeight;
+        }
+        _restoreView(gl) {
+            var viewport = this.viewport;
+            var vpX, vpY;
+            var vpW = viewport.width;
+            var vpH = viewport.height;
+            if (this._needInternalRenderTexture()) {
+                vpX = 0;
+                vpY = 0;
+            }
+            else {
+                vpX = viewport.x;
+                vpY = this._getCanvasHeight() - viewport.y - vpH;
+            }
+            gl.viewport(vpX, vpY, vpW, vpH);
+        }
+        render() {
+            if (!this.activeInHierarchy)
+                return;
+            this.viewport;
+            var context = RenderContext3D._instance;
+            context.scene = this._scene;
+            context.pipelineMode = context.configPipeLineMode;
+        }
+        _renderMainPass(context, viewport, scene, shader, replacementTag, needInternalRT) {
+        }
+        _calculateProjectionMatrix() {
+        }
+        clear(gl) {
+            gl.viewport(0, 0, this._clientWidth, this._clientHeight);
+            gl.scissor(0, 0, this._clientWidth, this._clientHeight);
+            gl.clearColor(this.clearColor.r, this.clearColor.g, this.clearColor.b, this.clearColor.a);
+            Laya.RenderStateContext.setDepthMask(true);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        }
+        destroy() {
+            super.destroy(true);
+        }
+    }
+
+    class WebXRRenderTexture extends Laya.RenderTexture {
+        constructor() {
+            super(1, 1, 1, Laya.RenderTargetFormat.STENCIL_8, false, 1);
+            this.frameLoop = -1;
+        }
+        set frameBuffer(value) {
+            this._frameBuffer = value;
+        }
+        _create(width, height) {
+        }
+    }
+
+    class WebXRSessionManager extends Laya.EventDispatcher {
+        constructor() {
+            super();
+            this.currentTimestamp = -1;
+            this.defaultHeightCompensation = 1.7;
+            this._sessionEnded = false;
+        }
+        get referenceSpace() {
+            return this._referenceSpace;
+        }
+        set referenceSpace(newReferenceSpace) {
+            this._referenceSpace = newReferenceSpace;
+        }
+        get sessionMode() {
+            return this._sessionMode;
+        }
+        exitXR() {
+            this.endXRRenderLoop();
+            this.event(WebXRSessionManager.EVENT_MANAGER_END);
+        }
+        initializeXRGL(xrSession, gl) {
+            return gl.makeXRCompatible().then(() => {
+                return true;
+            });
+        }
+        ;
+        initializeAsync() {
+            this._xrNavigator = navigator;
+            if (!this._xrNavigator.xr) {
+                return Promise.reject("WebXR not available");
+            }
+            return Promise.resolve();
+        }
+        isSessionSupportedAsync(sessionMode) {
+            if (!navigator.xr) {
+                return Promise.resolve(false);
+            }
+            else {
+                this._xrNavigator = navigator;
+            }
+            const functionToUse = navigator.xr.isSessionSupported || navigator.xr.supportsSession;
+            if (!functionToUse)
+                return Promise.resolve(false);
+            else {
+                return navigator.xr.isSessionSupported(sessionMode);
+            }
+        }
+        initializeSessionAsync(xrSessionMode = 'immersive-vr', xrSessionInit = {}) {
+            return this._xrNavigator.xr.requestSession('immersive-vr').then((session) => {
+                this.session = session;
+                this._sessionMode = xrSessionMode;
+                this._sessionEnded = false;
+                this.session.addEventListener("end", () => {
+                    this._sessionEnded = true;
+                    this.exitXR();
+                }, { once: true });
+                return this.session;
+            });
+        }
+        resetReferenceSpace() {
+            this.referenceSpace = this.baseReferenceSpace;
+        }
+        runXRRenderLoop() {
+            this.session.requestAnimationFrame.bind(this.session);
+            let fn = (timestamp, xrFrame) => {
+                this._updateByXrFrame(xrFrame, timestamp);
+                this.event(WebXRSessionManager.EVENT_FRAME_LOOP, [xrFrame]);
+                Laya.ILaya.stage.loop(timestamp);
+                this.session.requestAnimationFrame(fn);
+            };
+            this.session.requestAnimationFrame(fn);
+        }
+        endXRRenderLoop() {
+        }
+        _updateByXrFrame(xrFrame, timestamp) {
+            this.currentFrame = xrFrame;
+            this.currentTimestamp = timestamp;
+        }
+        setReferenceSpaceTypeAsync(referenceSpaceType = "local-floor") {
+            return this.session
+                .requestReferenceSpace(referenceSpaceType)
+                .then((referenceSpace) => {
+                return referenceSpace;
+            }, (rejectionReason) => {
+                return this.session.requestReferenceSpace("viewer").then((referenceSpace) => {
+                    const heightCompensation = new XRRigidTransform({ x: 0, y: -this.defaultHeightCompensation, z: 0 });
+                    return (referenceSpace).getOffsetReferenceSpace(heightCompensation);
+                }, (rejectionReason) => {
+                    throw 'XR initialization failed: required "viewer" reference space type not supported.';
+                });
+            }).then((referenceSpace) => {
+                this.referenceSpace = this.baseReferenceSpace = referenceSpace;
+                return this.referenceSpace;
+            });
+        }
+        updateRenderStateAsync(state) {
+            if (state.baseLayer) {
+                this._baseLayer = state.baseLayer;
+            }
+            return this.session.updateRenderState(state);
+        }
+        get currentFrameRate() {
+            var _a;
+            return (_a = this.session) === null || _a === void 0 ? void 0 : _a.frameRate;
+        }
+        get supportedFrameRates() {
+            var _a;
+            return (_a = this.session) === null || _a === void 0 ? void 0 : _a.supportedFrameRates;
+        }
+        updateTargetFrameRate(rate) {
+            return this.session.updateTargetFrameRate(rate);
+        }
+        destroy() {
+            if (!this._sessionEnded) {
+                this.exitXR();
+            }
+        }
+    }
+    WebXRSessionManager.EVENT_MANAGER_END = "xrManagerDestory";
+    WebXRSessionManager.EVENT_FRAME_LOOP = "xrFrameLoop";
+
+    class WebXRCameraManager {
+        get position() {
+            return this._position;
+        }
+        set position(newPosition) {
+            newPosition.cloneTo(this._position);
+        }
+        get rotationQuaternion() {
+            return this._referenceQuaternion;
+        }
+        set rotationQuaternion(value) {
+            value.cloneTo(this._referenceQuaternion);
+        }
+        get rigCameras() {
+            return this._rigCameras;
+        }
+        constructor(camera, manager = null) {
+            this._referenceQuaternion = new Laya.Quaternion();
+            this._referencedPosition = new Laya.Vector3();
+            this._firstFrame = true;
+            this._XRRenderTexture = new WebXRRenderTexture();
+            this._rigCameras = new Array();
+            this._position = new Laya.Vector3();
+            this.owner = camera;
+            this.owner.enableRender = false;
+            if (!this.owner.aspectRatio) {
+                console.warn("owner is not Camera");
+            }
+            this._webXRSessionManager = manager;
+            this._webXRSessionManager.on(WebXRSessionManager.EVENT_FRAME_LOOP, this, this._updateFromXRSession);
+            this._webXRSessionManager.on(WebXRSessionManager.EVENT_FRAME_LOOP, this, this._updateReferenceSpace);
+            this._webXRSessionManager.on(WebXRSessionManager.EVENT_MANAGER_END, this, this.destroy);
+        }
+        _updateFromXRSession() {
+            let pose = this._webXRSessionManager.currentFrame && this._webXRSessionManager.currentFrame.getViewerPose(this._webXRSessionManager.referenceSpace);
+            const pos = pose.transform.position;
+            const orientation = pose.transform.orientation;
+            this._referenceQuaternion.setValue(orientation.x, orientation.y, orientation.z, orientation.w);
+            this._referencedPosition.setValue(pos.x, pos.y, pos.z);
+            if (this._firstFrame) {
+                this._firstFrame = false;
+                this.position.y += this._referencedPosition.y;
+                this._referenceQuaternion.setValue(0, 0, 0, 1);
+            }
+            else {
+                this.rotationQuaternion = this._referenceQuaternion;
+                this.position = this._referencedPosition;
+            }
+            if (this.rigCameras.length !== pose.views.length) {
+                this._updateNumberOfRigCameras(pose.views.length);
+            }
+            pose.views.forEach((view, i) => {
+                const currentRig = this.rigCameras[i];
+                if (view.eye === "right")
+                    currentRig.name = "right";
+                else if (view.eye === "left")
+                    currentRig.name = "left";
+                const pos = view.transform.position;
+                const orientation = view.transform.orientation;
+                currentRig.transform.position.setValue(pos.x, pos.y, pos.z);
+                currentRig.transform.rotation.setValue(orientation.x, orientation.y, orientation.z, orientation.w);
+                currentRig.transform.position = currentRig.transform.position;
+                currentRig.transform.rotation = currentRig.transform.rotation;
+                if (this._webXRSessionManager.session.renderState.baseLayer) {
+                    var viewport = this._webXRSessionManager.session.renderState.baseLayer.getViewport(view);
+                    var width = this._webXRSessionManager.session.renderState.baseLayer.framebufferWidth;
+                    var height = this._webXRSessionManager.session.renderState.baseLayer.framebufferHeight;
+                    this._XRRenderTexture.frameBuffer = this._webXRSessionManager.session.renderState.baseLayer.framebuffer;
+                    currentRig.renderTarget = this._XRRenderTexture;
+                    currentRig.clientWidth = width;
+                    currentRig.clientHeight = height;
+                    var cameraViewPort = currentRig.viewport;
+                    cameraViewPort.x = viewport.x;
+                    cameraViewPort.y = viewport.y;
+                    cameraViewPort.width = viewport.width;
+                    cameraViewPort.height = viewport.height;
+                    currentRig.viewport = cameraViewPort;
+                    currentRig.projectionMatrix.cloneByArray(view.projectionMatrix);
+                }
+            });
+        }
+        _updateNumberOfRigCameras(viewCount = 1) {
+            while (this.rigCameras.length < viewCount) {
+                var xrcamera = new WebXRCamera(this.owner.aspectRatio, this.owner.nearPlane, this.owner.farPlane);
+                xrcamera.clearFlag = this.owner.clearFlag;
+                xrcamera.clearColor = this.owner.clearColor;
+                this.owner.addChild(xrcamera);
+                this.rigCameras.push(xrcamera);
+            }
+            while (this.rigCameras.length > viewCount) {
+                let xrcamera = this.rigCameras.pop();
+                this.owner.removeChild(xrcamera);
+            }
+        }
+        _updateReferenceSpace() {
+        }
+        destroy() {
+            this.owner.enableRender = true;
+            this._webXRSessionManager.off(WebXRSessionManager.EVENT_FRAME_LOOP, this, this._updateFromXRSession);
+            this._webXRSessionManager.off(WebXRSessionManager.EVENT_FRAME_LOOP, this, this._updateReferenceSpace);
+            this._webXRSessionManager.off(WebXRSessionManager.EVENT_MANAGER_END, this, this.destroy);
+            this._rigCameras.forEach(element => {
+                element.destroy();
+            });
+            this._rigCameras = null;
+            this._XRRenderTexture.destroy();
+        }
+    }
+
+    class AxiGamepad extends Laya.EventDispatcher {
+        constructor(handness, length) {
+            super();
+            this.axisData = new Array();
+            this.handness = handness;
+            this.axisData.length = length;
+            this.axisLength = length;
+        }
+        update(padGameAxi) {
+            for (let i = 0, j = 0; i < padGameAxi.axes.length; i += 2, ++j) {
+                if (!this.axisData[j])
+                    this.axisData[j] = new Laya.Vector2();
+                this.axisData[j].setValue(padGameAxi.axes[i], padGameAxi.axes[i + 1]);
+                this.outPutStickValue(this.axisData[j], j);
+            }
+        }
+        outPutStickValue(value, index) {
+            const eventnam = AxiGamepad.EVENT_OUTPUT + index.toString();
+            this.event(eventnam, [value]);
+        }
+        destroy() {
+            for (let i = 0; i < this.axisLength; i++) {
+                let eventname = AxiGamepad.EVENT_OUTPUT + i.toString();
+                this.offAll(eventname);
+            }
+        }
+    }
+    AxiGamepad.EVENT_OUTPUT = "outputAxi_id";
+    class ButtonGamepad extends Laya.EventDispatcher {
+        constructor(handness, index) {
+            super();
+            this.lastTouch = false;
+            this.lastPress = false;
+            this.lastPressValue = 0;
+            this.touch = false;
+            this.press = false;
+            this.pressValue = 0;
+            this.handness = handness;
+            this.index = index;
+        }
+        update(padButton) {
+            this.lastTouch = this.touch;
+            this.lastPress = this.press;
+            this.lastPressValue = this.pressValue;
+            this.touch = padButton.touched;
+            this.press = padButton.pressed;
+            this.pressValue = padButton.value;
+            if (!this.lastTouch && !this.touch) {
+                return;
+            }
+            if (this.lastTouch != this.touch && this.touch) {
+                this.touchEnter();
+            }
+            else if (this.lastTouch == this.touch && this.touch) {
+                this.touchStay();
+            }
+            else if (this.lastTouch != this.touch && !this.touch) {
+                this.touchOut();
+            }
+            if (this.lastPress != this.press && this.press) {
+                this.pressEnter();
+            }
+            else if (this.lastPress == this.press && this.press) {
+                this.pressStay();
+            }
+            else if (this.lastPress != this.press && !this.press) {
+                this.pressOut();
+            }
+            if (this.touch) {
+                this.outpressed();
+            }
+        }
+        touchEnter() {
+            this.event(ButtonGamepad.EVENT_TOUCH_ENTER);
+        }
+        touchStay() {
+            this.event(ButtonGamepad.EVENT_TOUCH_STAY);
+        }
+        touchOut() {
+            this.event(ButtonGamepad.EVENT_TOUCH_OUT);
+        }
+        pressEnter() {
+            this.event(ButtonGamepad.EVENT_PRESS_ENTER);
+        }
+        pressStay() {
+            this.event(ButtonGamepad.EVENT_PRESS_STAY);
+        }
+        pressOut() {
+            this.event(ButtonGamepad.EVENT_PRESS_OUT);
+        }
+        outpressed() {
+            this.event(ButtonGamepad.EVENT_PRESS_VALUE, [this.pressValue]);
+        }
+        destroy() {
+            this.offAll(ButtonGamepad.EVENT_PRESS_ENTER);
+            this.offAll(ButtonGamepad.EVENT_PRESS_STAY);
+            this.offAll(ButtonGamepad.EVENT_PRESS_OUT);
+            this.offAll(ButtonGamepad.EVENT_PRESS_ENTER);
+            this.offAll(ButtonGamepad.EVENT_PRESS_STAY);
+            this.offAll(ButtonGamepad.EVENT_PRESS_OUT);
+            this.offAll(ButtonGamepad.EVENT_PRESS_VALUE);
+        }
+    }
+    ButtonGamepad.EVENT_TOUCH_ENTER = "touchEnter";
+    ButtonGamepad.EVENT_TOUCH_STAY = "touchStay";
+    ButtonGamepad.EVENT_TOUCH_OUT = "touchOut";
+    ButtonGamepad.EVENT_PRESS_ENTER = "pressEnter";
+    ButtonGamepad.EVENT_PRESS_STAY = "pressStay";
+    ButtonGamepad.EVENT_PRESS_OUT = "pressOut";
+    ButtonGamepad.EVENT_PRESS_VALUE = "outpressed";
+
+    class WebXRInput extends Laya.EventDispatcher {
+        constructor(handness) {
+            super();
+            this.preButtonEventList = [];
+            this.preAxisEventList = [];
+            this.handness = handness;
+            this.position = new Laya.Vector3();
+            this.rotation = new Laya.Quaternion();
+            this.ray = new Ray(new Laya.Vector3(), new Laya.Vector3());
+        }
+        _updateByXRPose(xrFrame, referenceSpace) {
+            const rayPose = xrFrame.getPose(this._inputSource.targetRaySpace, referenceSpace);
+            this._lastXRPose = rayPose;
+            if (rayPose) {
+                const pos = rayPose.transform.position;
+                const orientation = rayPose.transform.orientation;
+                WebXRInput.tempQua.setValue(orientation.x, orientation.y, orientation.z, orientation.w);
+                this.ray.origin.setValue(pos.x, pos.y, pos.z);
+                Laya.Vector3.transformQuat(Laya.Vector3.UnitZ, WebXRInput.tempQua, this.ray.direction);
+                Laya.Vector3.scale(this.ray.direction, -1, this.ray.direction);
+            }
+            if (this._inputSource.gripSpace) {
+                let meshPose = xrFrame.getPose(this._inputSource.gripSpace, referenceSpace);
+                if (meshPose) {
+                    const pos = meshPose.transform.position;
+                    const orientation = meshPose.transform.orientation;
+                    this.position.setValue(pos.x, pos.y, pos.z);
+                    this.rotation.setValue(orientation.x, orientation.y, orientation.z, orientation.w);
+                }
+            }
+            this.event(WebXRInput.EVENT_FRAMEUPDATA_WEBXRINPUT, [this]);
+            this._handleProcessGamepad();
+        }
+        _handleProcessGamepad() {
+            const gamepad = this._inputSource.gamepad;
+            if (!this.gamepadAxis) {
+                this.gamepadAxis = new AxiGamepad(this.handness, gamepad.axes.length);
+                this.preAxisEventList.forEach(element => {
+                    this.gamepadAxis.on(element.eventnam, element.caller, element.listener);
+                });
+            }
+            if (!this.gamepadButton) {
+                this.gamepadButton = [];
+                for (let i = 0; i < gamepad.buttons.length; ++i) {
+                    this.gamepadButton.push(new ButtonGamepad(this.handness, i));
+                }
+                this.preButtonEventList.forEach(element => {
+                    this.addButtonEvent(element.index, element.type, element.caller, element.listener);
+                });
+            }
+            this.gamepadAxis.update(gamepad);
+            for (let i = 0; i < gamepad.buttons.length; ++i) {
+                let button = this.gamepadButton[i];
+                button.update(gamepad.buttons[i]);
+            }
+        }
+        addButtonEvent(index, type, caller, listener) {
+            if (!this.gamepadButton) {
+                this.preButtonEventList.push({
+                    "index": index,
+                    "type": type,
+                    "caller": caller,
+                    "listener": listener
+                });
+            }
+            else {
+                let button = this.gamepadButton[index];
+                button.on(type, caller, listener);
+            }
+        }
+        addAxisEvent(index, type, caller, listener) {
+            if (!this.gamepadAxis) {
+                this.preAxisEventList.push({
+                    "eventnam": type + index.toString(),
+                    "caller": caller,
+                    "listener": listener
+                });
+            }
+            else {
+                const eventnam = type + index.toString();
+                this.gamepadAxis.on(eventnam, caller, listener);
+            }
+        }
+        offAxisEvent(index, type, caller, listener) {
+            if (this.gamepadAxis) {
+                const eventnam = type + index.toString();
+                this.gamepadAxis.off(eventnam, caller, listener);
+            }
+        }
+        offButtonEvent(index, type, caller, listener) {
+            if (this.gamepadButton) {
+                let button = this.gamepadButton[index];
+                button.off(type, caller, listener);
+            }
+        }
+        destroy() {
+            this.preButtonEventList = null;
+            this.ray = null;
+            this.position = null;
+            this.rotation = null;
+            this.gamepadAxis.destroy();
+            this.gamepadButton.forEach(element => {
+                element.destroy();
+            });
+        }
+    }
+    WebXRInput.HANDNESS_LEFT = "left";
+    WebXRInput.HANDNESS_RIGHT = "right";
+    WebXRInput.EVENT_FRAMEUPDATA_WEBXRINPUT = "frameXRInputUpdate";
+    WebXRInput.tempQua = new Laya.Quaternion();
+
+    class WebXRInputManager {
+        constructor(webxrManager, webXRCamera) {
+            this.controllers = new Map();
+            this.controllerHandMesh = new Map();
+            this.controllerLineRender = new Map();
+            this.lineColor = Laya.Color.RED;
+            this.rayLength = 2;
+            this.webXRSessionManager = webxrManager;
+            this.webXRCameraManager = webXRCamera;
+            this.webXRSessionManager.on(WebXRSessionManager.EVENT_MANAGER_END, this, this.destory);
+            this.webXRSessionManager.on(WebXRSessionManager.EVENT_FRAME_LOOP, this, this._updateFromXRFrame);
+        }
+        _updataMeshRender(xrInput) {
+            const handness = xrInput.handness;
+            if (this.controllerHandMesh.has(handness)) {
+                let meshNode = this.controllerHandMesh.get(handness);
+                meshNode.transform.position = xrInput.position;
+                meshNode.transform.rotation = xrInput.rotation;
+            }
+            if (this.controllerLineRender.has(handness)) {
+                let line = this.controllerLineRender.get(handness);
+                line.clear();
+                let ray = xrInput.ray;
+                tempVec$1.setValue(ray.origin.x, ray.origin.y, ray.origin.z);
+                Laya.Vector3.scale(ray.direction, this.rayLength, tempVec1);
+                Laya.Vector3.add(tempVec$1, tempVec1, tempVec1);
+                line.addLine(tempVec$1, tempVec1, this.lineColor, this.lineColor);
+            }
+        }
+        _updateFromXRFrame(xrFrame) {
+            const session = this.webXRSessionManager.session;
+            const refSpace = this.webXRSessionManager.referenceSpace;
+            for (let inputSource of session.inputSources) {
+                const key = inputSource.handedness;
+                let xrInput;
+                if (!this.controllers.has(key)) {
+                    xrInput = this.getController(key);
+                }
+                else
+                    xrInput = this.controllers.get(key);
+                if (xrInput) {
+                    xrInput = this.controllers.get(key);
+                    xrInput._inputSource = inputSource;
+                    xrInput._updateByXRPose(xrFrame, refSpace);
+                }
+            }
+        }
+        bindMeshNode(meshSprite, handness) {
+            this.controllerHandMesh.set(handness, meshSprite);
+        }
+        bindRayNode(lineSprite, handness) {
+            this.controllerLineRender.set(handness, lineSprite);
+        }
+        getController(handness) {
+            if (handness != "left" && handness != "right")
+                return null;
+            if (!this.controllers.has(handness)) {
+                let value = new WebXRInput(handness);
+                this.controllers.set(handness, value);
+                value.on(WebXRInput.EVENT_FRAMEUPDATA_WEBXRINPUT, this, this._updataMeshRender);
+            }
+            return this.controllers.get(handness);
+        }
+        destory() {
+            this.webXRSessionManager.off(WebXRSessionManager.EVENT_FRAME_LOOP, this, this._updateFromXRFrame);
+            for (let key in this.controllers) {
+                this.controllers.get(key).off("frameXRInputUpdate", this, this._updataMeshRender);
+                this.controllers.get(key).destroy();
+            }
+            this.controllers = null;
+            this.controllerHandMesh = null;
+            this.controllerLineRender = null;
+        }
+    }
+    const tempVec$1 = new Laya.Vector3();
+    const tempVec1 = new Laya.Vector3();
+
+    class WebXRCameraInfo {
+    }
+    class WebXRExperienceHelper {
+        static supportXR(sessionMode) {
+            return WebXRExperienceHelper.xr_Manager.isSessionSupportedAsync(sessionMode).then(value => {
+                WebXRExperienceHelper.supported = value;
+                return value;
+            });
+        }
+        static enterXRAsync(sessionMode, referenceSpaceType, cameraInfo) {
+            if (sessionMode === "immersive-ar" && referenceSpaceType !== "unbounded") {
+                console.warn("We recommend using 'unbounded' reference space type when using 'immersive-ar' session mode");
+            }
+            return WebXRExperienceHelper.xr_Manager.initializeSessionAsync(sessionMode).then(() => {
+                return WebXRExperienceHelper.xr_Manager.setReferenceSpaceTypeAsync(referenceSpaceType);
+            }).then(() => {
+                return WebXRExperienceHelper.xr_Manager.initializeXRGL(sessionMode, Laya.LayaGL.renderEngine.gl);
+            }).then(() => {
+                WebXRExperienceHelper.glInstance = Laya.LayaGL.renderEngine.gl;
+                return WebXRExperienceHelper.xr_Manager.updateRenderStateAsync({
+                    depthFar: cameraInfo.depthFar,
+                    depthNear: cameraInfo.depthNear,
+                    baseLayer: new XRWebGLLayer(WebXRExperienceHelper.xr_Manager.session, Laya.LayaGL.renderEngine.gl),
+                });
+            }).then(() => {
+                WebXRExperienceHelper.xr_Manager.runXRRenderLoop();
+                return WebXRExperienceHelper.xr_Manager;
+            });
+        }
+        static setWebXRCamera(camera, manager) {
+            return new WebXRCameraManager(camera, manager);
+        }
+        static setWebXRInput(sessionManager, cameraManager) {
+            return new WebXRInputManager(sessionManager, cameraManager);
+        }
+    }
+    WebXRExperienceHelper.xr_Manager = new WebXRSessionManager();
+    WebXRExperienceHelper.supported = false;
+    WebXRExperienceHelper.canvasOptions = {
+        antialias: true,
+        depth: true,
+        stencil: false,
+        alpha: true,
+        multiview: false,
+        framebufferScaleFactor: 1,
+    };
 
     class CommandUniformMap {
         constructor(stateName) {
@@ -29950,656 +30600,6 @@
             }
         }
     }
-
-    class WebXRCamera extends Camera {
-        constructor() {
-            super(...arguments);
-            this.isWebXR = true;
-        }
-        get renderTarget() {
-            return this._internalRenderTexture;
-        }
-        set renderTarget(value) {
-            this._internalRenderTexture = value;
-        }
-        set clientWidth(value) {
-            this._clientWidth = value;
-        }
-        set clientHeight(value) {
-            this._clientHeight = value;
-        }
-        get clientWidth() {
-            return this._clientWidth;
-        }
-        get clientHeight() {
-            return this._clientHeight;
-        }
-        _restoreView(gl) {
-            var viewport = this.viewport;
-            var vpX, vpY;
-            var vpW = viewport.width;
-            var vpH = viewport.height;
-            if (this._needInternalRenderTexture()) {
-                vpX = 0;
-                vpY = 0;
-            }
-            else {
-                vpX = viewport.x;
-                vpY = this._getCanvasHeight() - viewport.y - vpH;
-            }
-            gl.viewport(vpX, vpY, vpW, vpH);
-        }
-        render() {
-            if (!this.activeInHierarchy)
-                return;
-            this.viewport;
-            var context = RenderContext3D._instance;
-            context.scene = this._scene;
-            context.pipelineMode = context.configPipeLineMode;
-        }
-        _renderMainPass(context, viewport, scene, shader, replacementTag, needInternalRT) {
-        }
-        _calculateProjectionMatrix() {
-        }
-        clear(gl) {
-            gl.viewport(0, 0, this._clientWidth, this._clientHeight);
-            gl.scissor(0, 0, this._clientWidth, this._clientHeight);
-            gl.clearColor(this.clearColor.r, this.clearColor.g, this.clearColor.b, this.clearColor.a);
-            Laya.RenderStateContext.setDepthMask(true);
-            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        }
-        destroy() {
-            super.destroy(true);
-        }
-    }
-
-    class WebXRRenderTexture extends Laya.RenderTexture {
-        constructor() {
-            super(1, 1, 1, Laya.RenderTargetFormat.STENCIL_8, false, 1);
-            this.frameLoop = -1;
-        }
-        set frameBuffer(value) {
-            this._frameBuffer = value;
-        }
-        _create(width, height) {
-        }
-    }
-
-    class WebXRSessionManager extends Laya.EventDispatcher {
-        constructor() {
-            super();
-            this.currentTimestamp = -1;
-            this.defaultHeightCompensation = 1.7;
-            this._sessionEnded = false;
-        }
-        get referenceSpace() {
-            return this._referenceSpace;
-        }
-        set referenceSpace(newReferenceSpace) {
-            this._referenceSpace = newReferenceSpace;
-        }
-        get sessionMode() {
-            return this._sessionMode;
-        }
-        exitXR() {
-            this.endXRRenderLoop();
-            this.event(WebXRSessionManager.EVENT_MANAGER_END);
-        }
-        initializeXRGL(xrSession, gl) {
-            return gl.makeXRCompatible().then(() => {
-                return true;
-            });
-        }
-        ;
-        initializeAsync() {
-            this._xrNavigator = navigator;
-            if (!this._xrNavigator.xr) {
-                return Promise.reject("WebXR not available");
-            }
-            return Promise.resolve();
-        }
-        isSessionSupportedAsync(sessionMode) {
-            if (!navigator.xr) {
-                return Promise.resolve(false);
-            }
-            else {
-                this._xrNavigator = navigator;
-            }
-            const functionToUse = navigator.xr.isSessionSupported || navigator.xr.supportsSession;
-            if (!functionToUse)
-                return Promise.resolve(false);
-            else {
-                return navigator.xr.isSessionSupported(sessionMode);
-            }
-        }
-        initializeSessionAsync(xrSessionMode = 'immersive-vr', xrSessionInit = {}) {
-            return this._xrNavigator.xr.requestSession('immersive-vr').then((session) => {
-                this.session = session;
-                this._sessionMode = xrSessionMode;
-                this._sessionEnded = false;
-                this.session.addEventListener("end", () => {
-                    this._sessionEnded = true;
-                    this.exitXR();
-                }, { once: true });
-                return this.session;
-            });
-        }
-        resetReferenceSpace() {
-            this.referenceSpace = this.baseReferenceSpace;
-        }
-        runXRRenderLoop() {
-            this.session.requestAnimationFrame.bind(this.session);
-            let fn = (timestamp, xrFrame) => {
-                this._updateByXrFrame(xrFrame, timestamp);
-                this.event(WebXRSessionManager.EVENT_FRAME_LOOP, [xrFrame]);
-                Laya.ILaya.stage.loop(timestamp);
-                this.session.requestAnimationFrame(fn);
-            };
-            this.session.requestAnimationFrame(fn);
-        }
-        endXRRenderLoop() {
-        }
-        _updateByXrFrame(xrFrame, timestamp) {
-            this.currentFrame = xrFrame;
-            this.currentTimestamp = timestamp;
-        }
-        setReferenceSpaceTypeAsync(referenceSpaceType = "local-floor") {
-            return this.session
-                .requestReferenceSpace(referenceSpaceType)
-                .then((referenceSpace) => {
-                return referenceSpace;
-            }, (rejectionReason) => {
-                return this.session.requestReferenceSpace("viewer").then((referenceSpace) => {
-                    const heightCompensation = new XRRigidTransform({ x: 0, y: -this.defaultHeightCompensation, z: 0 });
-                    return (referenceSpace).getOffsetReferenceSpace(heightCompensation);
-                }, (rejectionReason) => {
-                    throw 'XR initialization failed: required "viewer" reference space type not supported.';
-                });
-            }).then((referenceSpace) => {
-                this.referenceSpace = this.baseReferenceSpace = referenceSpace;
-                return this.referenceSpace;
-            });
-        }
-        updateRenderStateAsync(state) {
-            if (state.baseLayer) {
-                this._baseLayer = state.baseLayer;
-            }
-            return this.session.updateRenderState(state);
-        }
-        get currentFrameRate() {
-            var _a;
-            return (_a = this.session) === null || _a === void 0 ? void 0 : _a.frameRate;
-        }
-        get supportedFrameRates() {
-            var _a;
-            return (_a = this.session) === null || _a === void 0 ? void 0 : _a.supportedFrameRates;
-        }
-        updateTargetFrameRate(rate) {
-            return this.session.updateTargetFrameRate(rate);
-        }
-        destroy() {
-            if (!this._sessionEnded) {
-                this.exitXR();
-            }
-        }
-    }
-    WebXRSessionManager.EVENT_MANAGER_END = "xrManagerDestory";
-    WebXRSessionManager.EVENT_FRAME_LOOP = "xrFrameLoop";
-
-    class WebXRCameraManager {
-        get position() {
-            return this._position;
-        }
-        set position(newPosition) {
-            newPosition.cloneTo(this._position);
-        }
-        get rotationQuaternion() {
-            return this._referenceQuaternion;
-        }
-        set rotationQuaternion(value) {
-            value.cloneTo(this._referenceQuaternion);
-        }
-        get rigCameras() {
-            return this._rigCameras;
-        }
-        constructor(camera, manager = null) {
-            this._referenceQuaternion = new Laya.Quaternion();
-            this._referencedPosition = new Laya.Vector3();
-            this._firstFrame = true;
-            this._XRRenderTexture = new WebXRRenderTexture();
-            this._rigCameras = new Array();
-            this._position = new Laya.Vector3();
-            this.owner = camera;
-            this.owner.enableRender = false;
-            if (!this.owner.aspectRatio) {
-                console.warn("owner is not Camera");
-            }
-            this._webXRSessionManager = manager;
-            this._webXRSessionManager.on(WebXRSessionManager.EVENT_FRAME_LOOP, this, this._updateFromXRSession);
-            this._webXRSessionManager.on(WebXRSessionManager.EVENT_FRAME_LOOP, this, this._updateReferenceSpace);
-            this._webXRSessionManager.on(WebXRSessionManager.EVENT_MANAGER_END, this, this.destroy);
-        }
-        _updateFromXRSession() {
-            let pose = this._webXRSessionManager.currentFrame && this._webXRSessionManager.currentFrame.getViewerPose(this._webXRSessionManager.referenceSpace);
-            const pos = pose.transform.position;
-            const orientation = pose.transform.orientation;
-            this._referenceQuaternion.setValue(orientation.x, orientation.y, orientation.z, orientation.w);
-            this._referencedPosition.setValue(pos.x, pos.y, pos.z);
-            if (this._firstFrame) {
-                this._firstFrame = false;
-                this.position.y += this._referencedPosition.y;
-                this._referenceQuaternion.setValue(0, 0, 0, 1);
-            }
-            else {
-                this.rotationQuaternion = this._referenceQuaternion;
-                this.position = this._referencedPosition;
-            }
-            if (this.rigCameras.length !== pose.views.length) {
-                this._updateNumberOfRigCameras(pose.views.length);
-            }
-            pose.views.forEach((view, i) => {
-                const currentRig = this.rigCameras[i];
-                if (view.eye === "right")
-                    currentRig.name = "right";
-                else if (view.eye === "left")
-                    currentRig.name = "left";
-                const pos = view.transform.position;
-                const orientation = view.transform.orientation;
-                currentRig.transform.position.setValue(pos.x, pos.y, pos.z);
-                currentRig.transform.rotation.setValue(orientation.x, orientation.y, orientation.z, orientation.w);
-                currentRig.transform.position = currentRig.transform.position;
-                currentRig.transform.rotation = currentRig.transform.rotation;
-                if (this._webXRSessionManager.session.renderState.baseLayer) {
-                    var viewport = this._webXRSessionManager.session.renderState.baseLayer.getViewport(view);
-                    var width = this._webXRSessionManager.session.renderState.baseLayer.framebufferWidth;
-                    var height = this._webXRSessionManager.session.renderState.baseLayer.framebufferHeight;
-                    this._XRRenderTexture.frameBuffer = this._webXRSessionManager.session.renderState.baseLayer.framebuffer;
-                    currentRig.renderTarget = this._XRRenderTexture;
-                    currentRig.clientWidth = width;
-                    currentRig.clientHeight = height;
-                    var cameraViewPort = currentRig.viewport;
-                    cameraViewPort.x = viewport.x;
-                    cameraViewPort.y = viewport.y;
-                    cameraViewPort.width = viewport.width;
-                    cameraViewPort.height = viewport.height;
-                    currentRig.viewport = cameraViewPort;
-                    currentRig.projectionMatrix.cloneByArray(view.projectionMatrix);
-                }
-            });
-        }
-        _updateNumberOfRigCameras(viewCount = 1) {
-            while (this.rigCameras.length < viewCount) {
-                var xrcamera = new WebXRCamera(this.owner.aspectRatio, this.owner.nearPlane, this.owner.farPlane);
-                xrcamera.clearFlag = this.owner.clearFlag;
-                xrcamera.clearColor = this.owner.clearColor;
-                this.owner.addChild(xrcamera);
-                this.rigCameras.push(xrcamera);
-            }
-            while (this.rigCameras.length > viewCount) {
-                let xrcamera = this.rigCameras.pop();
-                this.owner.removeChild(xrcamera);
-            }
-        }
-        _updateReferenceSpace() {
-        }
-        destroy() {
-            this.owner.enableRender = true;
-            this._webXRSessionManager.off(WebXRSessionManager.EVENT_FRAME_LOOP, this, this._updateFromXRSession);
-            this._webXRSessionManager.off(WebXRSessionManager.EVENT_FRAME_LOOP, this, this._updateReferenceSpace);
-            this._webXRSessionManager.off(WebXRSessionManager.EVENT_MANAGER_END, this, this.destroy);
-            this._rigCameras.forEach(element => {
-                element.destroy();
-            });
-            this._rigCameras = null;
-            this._XRRenderTexture.destroy();
-        }
-    }
-
-    class AxiGamepad extends Laya.EventDispatcher {
-        constructor(handness, length) {
-            super();
-            this.axisData = new Array();
-            this.handness = handness;
-            this.axisData.length = length;
-            this.axisLength = length;
-        }
-        update(padGameAxi) {
-            for (let i = 0, j = 0; i < padGameAxi.axes.length; i += 2, ++j) {
-                if (!this.axisData[j])
-                    this.axisData[j] = new Laya.Vector2();
-                this.axisData[j].setValue(padGameAxi.axes[i], padGameAxi.axes[i + 1]);
-                this.outPutStickValue(this.axisData[j], j);
-            }
-        }
-        outPutStickValue(value, index) {
-            const eventnam = AxiGamepad.EVENT_OUTPUT + index.toString();
-            this.event(eventnam, [value]);
-        }
-        destroy() {
-            for (let i = 0; i < this.axisLength; i++) {
-                let eventname = AxiGamepad.EVENT_OUTPUT + i.toString();
-                this.offAll(eventname);
-            }
-        }
-    }
-    AxiGamepad.EVENT_OUTPUT = "outputAxi_id";
-    class ButtonGamepad extends Laya.EventDispatcher {
-        constructor(handness, index) {
-            super();
-            this.lastTouch = false;
-            this.lastPress = false;
-            this.lastPressValue = 0;
-            this.touch = false;
-            this.press = false;
-            this.pressValue = 0;
-            this.handness = handness;
-            this.index = index;
-        }
-        update(padButton) {
-            this.lastTouch = this.touch;
-            this.lastPress = this.press;
-            this.lastPressValue = this.pressValue;
-            this.touch = padButton.touched;
-            this.press = padButton.pressed;
-            this.pressValue = padButton.value;
-            if (!this.lastTouch && !this.touch) {
-                return;
-            }
-            if (this.lastTouch != this.touch && this.touch) {
-                this.touchEnter();
-            }
-            else if (this.lastTouch == this.touch && this.touch) {
-                this.touchStay();
-            }
-            else if (this.lastTouch != this.touch && !this.touch) {
-                this.touchOut();
-            }
-            if (this.lastPress != this.press && this.press) {
-                this.pressEnter();
-            }
-            else if (this.lastPress == this.press && this.press) {
-                this.pressStay();
-            }
-            else if (this.lastPress != this.press && !this.press) {
-                this.pressOut();
-            }
-            if (this.touch) {
-                this.outpressed();
-            }
-        }
-        touchEnter() {
-            this.event(ButtonGamepad.EVENT_TOUCH_ENTER);
-        }
-        touchStay() {
-            this.event(ButtonGamepad.EVENT_TOUCH_STAY);
-        }
-        touchOut() {
-            this.event(ButtonGamepad.EVENT_TOUCH_OUT);
-        }
-        pressEnter() {
-            this.event(ButtonGamepad.EVENT_PRESS_ENTER);
-        }
-        pressStay() {
-            this.event(ButtonGamepad.EVENT_PRESS_STAY);
-        }
-        pressOut() {
-            this.event(ButtonGamepad.EVENT_PRESS_OUT);
-        }
-        outpressed() {
-            this.event(ButtonGamepad.EVENT_PRESS_VALUE, [this.pressValue]);
-        }
-        destroy() {
-            this.offAll(ButtonGamepad.EVENT_PRESS_ENTER);
-            this.offAll(ButtonGamepad.EVENT_PRESS_STAY);
-            this.offAll(ButtonGamepad.EVENT_PRESS_OUT);
-            this.offAll(ButtonGamepad.EVENT_PRESS_ENTER);
-            this.offAll(ButtonGamepad.EVENT_PRESS_STAY);
-            this.offAll(ButtonGamepad.EVENT_PRESS_OUT);
-            this.offAll(ButtonGamepad.EVENT_PRESS_VALUE);
-        }
-    }
-    ButtonGamepad.EVENT_TOUCH_ENTER = "touchEnter";
-    ButtonGamepad.EVENT_TOUCH_STAY = "touchStay";
-    ButtonGamepad.EVENT_TOUCH_OUT = "touchOut";
-    ButtonGamepad.EVENT_PRESS_ENTER = "pressEnter";
-    ButtonGamepad.EVENT_PRESS_STAY = "pressStay";
-    ButtonGamepad.EVENT_PRESS_OUT = "pressOut";
-    ButtonGamepad.EVENT_PRESS_VALUE = "outpressed";
-
-    class WebXRInput extends Laya.EventDispatcher {
-        constructor(handness) {
-            super();
-            this.preButtonEventList = [];
-            this.preAxisEventList = [];
-            this.handness = handness;
-            this.position = new Laya.Vector3();
-            this.rotation = new Laya.Quaternion();
-            this.ray = new Ray(new Laya.Vector3(), new Laya.Vector3());
-        }
-        _updateByXRPose(xrFrame, referenceSpace) {
-            const rayPose = xrFrame.getPose(this._inputSource.targetRaySpace, referenceSpace);
-            this._lastXRPose = rayPose;
-            if (rayPose) {
-                const pos = rayPose.transform.position;
-                const orientation = rayPose.transform.orientation;
-                WebXRInput.tempQua.setValue(orientation.x, orientation.y, orientation.z, orientation.w);
-                this.ray.origin.setValue(pos.x, pos.y, pos.z);
-                Laya.Vector3.transformQuat(Laya.Vector3.UnitZ, WebXRInput.tempQua, this.ray.direction);
-                Laya.Vector3.scale(this.ray.direction, -1, this.ray.direction);
-            }
-            if (this._inputSource.gripSpace) {
-                let meshPose = xrFrame.getPose(this._inputSource.gripSpace, referenceSpace);
-                if (meshPose) {
-                    const pos = meshPose.transform.position;
-                    const orientation = meshPose.transform.orientation;
-                    this.position.setValue(pos.x, pos.y, pos.z);
-                    this.rotation.setValue(orientation.x, orientation.y, orientation.z, orientation.w);
-                }
-            }
-            this.event(WebXRInput.EVENT_FRAMEUPDATA_WEBXRINPUT, [this]);
-            this._handleProcessGamepad();
-        }
-        _handleProcessGamepad() {
-            const gamepad = this._inputSource.gamepad;
-            if (!this.gamepadAxis) {
-                this.gamepadAxis = new AxiGamepad(this.handness, gamepad.axes.length);
-                this.preAxisEventList.forEach(element => {
-                    this.gamepadAxis.on(element.eventnam, element.caller, element.listener);
-                });
-            }
-            if (!this.gamepadButton) {
-                this.gamepadButton = [];
-                for (let i = 0; i < gamepad.buttons.length; ++i) {
-                    this.gamepadButton.push(new ButtonGamepad(this.handness, i));
-                }
-                this.preButtonEventList.forEach(element => {
-                    this.addButtonEvent(element.index, element.type, element.caller, element.listener);
-                });
-            }
-            this.gamepadAxis.update(gamepad);
-            for (let i = 0; i < gamepad.buttons.length; ++i) {
-                let button = this.gamepadButton[i];
-                button.update(gamepad.buttons[i]);
-            }
-        }
-        addButtonEvent(index, type, caller, listener) {
-            if (!this.gamepadButton) {
-                this.preButtonEventList.push({
-                    "index": index,
-                    "type": type,
-                    "caller": caller,
-                    "listener": listener
-                });
-            }
-            else {
-                let button = this.gamepadButton[index];
-                button.on(type, caller, listener);
-            }
-        }
-        addAxisEvent(index, type, caller, listener) {
-            if (!this.gamepadAxis) {
-                this.preAxisEventList.push({
-                    "eventnam": type + index.toString(),
-                    "caller": caller,
-                    "listener": listener
-                });
-            }
-            else {
-                const eventnam = type + index.toString();
-                this.gamepadAxis.on(eventnam, caller, listener);
-            }
-        }
-        offAxisEvent(index, type, caller, listener) {
-            if (this.gamepadAxis) {
-                const eventnam = type + index.toString();
-                this.gamepadAxis.off(eventnam, caller, listener);
-            }
-        }
-        offButtonEvent(index, type, caller, listener) {
-            if (this.gamepadButton) {
-                let button = this.gamepadButton[index];
-                button.off(type, caller, listener);
-            }
-        }
-        destroy() {
-            this.preButtonEventList = null;
-            this.ray = null;
-            this.position = null;
-            this.rotation = null;
-            this.gamepadAxis.destroy();
-            this.gamepadButton.forEach(element => {
-                element.destroy();
-            });
-        }
-    }
-    WebXRInput.HANDNESS_LEFT = "left";
-    WebXRInput.HANDNESS_RIGHT = "right";
-    WebXRInput.EVENT_FRAMEUPDATA_WEBXRINPUT = "frameXRInputUpdate";
-    WebXRInput.tempQua = new Laya.Quaternion();
-
-    class WebXRInputManager {
-        constructor(webxrManager, webXRCamera) {
-            this.controllers = new Map();
-            this.controllerHandMesh = new Map();
-            this.controllerLineRender = new Map();
-            this.lineColor = Laya.Color.RED;
-            this.rayLength = 2;
-            this.webXRSessionManager = webxrManager;
-            this.webXRCameraManager = webXRCamera;
-            this.webXRSessionManager.on(WebXRSessionManager.EVENT_MANAGER_END, this, this.destory);
-            this.webXRSessionManager.on(WebXRSessionManager.EVENT_FRAME_LOOP, this, this._updateFromXRFrame);
-        }
-        _updataMeshRender(xrInput) {
-            const handness = xrInput.handness;
-            if (this.controllerHandMesh.has(handness)) {
-                let meshNode = this.controllerHandMesh.get(handness);
-                meshNode.transform.position = xrInput.position;
-                meshNode.transform.rotation = xrInput.rotation;
-            }
-            if (this.controllerLineRender.has(handness)) {
-                let line = this.controllerLineRender.get(handness);
-                line.clear();
-                let ray = xrInput.ray;
-                tempVec$1.setValue(ray.origin.x, ray.origin.y, ray.origin.z);
-                Laya.Vector3.scale(ray.direction, this.rayLength, tempVec1);
-                Laya.Vector3.add(tempVec$1, tempVec1, tempVec1);
-                line.addLine(tempVec$1, tempVec1, this.lineColor, this.lineColor);
-            }
-        }
-        _updateFromXRFrame(xrFrame) {
-            const session = this.webXRSessionManager.session;
-            const refSpace = this.webXRSessionManager.referenceSpace;
-            for (let inputSource of session.inputSources) {
-                const key = inputSource.handedness;
-                let xrInput;
-                if (!this.controllers.has(key)) {
-                    xrInput = this.getController(key);
-                }
-                else
-                    xrInput = this.controllers.get(key);
-                if (xrInput) {
-                    xrInput = this.controllers.get(key);
-                    xrInput._inputSource = inputSource;
-                    xrInput._updateByXRPose(xrFrame, refSpace);
-                }
-            }
-        }
-        bindMeshNode(meshSprite, handness) {
-            this.controllerHandMesh.set(handness, meshSprite);
-        }
-        bindRayNode(lineSprite, handness) {
-            this.controllerLineRender.set(handness, lineSprite);
-        }
-        getController(handness) {
-            if (handness != "left" && handness != "right")
-                return null;
-            if (!this.controllers.has(handness)) {
-                let value = new WebXRInput(handness);
-                this.controllers.set(handness, value);
-                value.on(WebXRInput.EVENT_FRAMEUPDATA_WEBXRINPUT, this, this._updataMeshRender);
-            }
-            return this.controllers.get(handness);
-        }
-        destory() {
-            this.webXRSessionManager.off(WebXRSessionManager.EVENT_FRAME_LOOP, this, this._updateFromXRFrame);
-            for (let key in this.controllers) {
-                this.controllers.get(key).off("frameXRInputUpdate", this, this._updataMeshRender);
-                this.controllers.get(key).destroy();
-            }
-            this.controllers = null;
-            this.controllerHandMesh = null;
-            this.controllerLineRender = null;
-        }
-    }
-    const tempVec$1 = new Laya.Vector3();
-    const tempVec1 = new Laya.Vector3();
-
-    class WebXRCameraInfo {
-    }
-    class WebXRExperienceHelper {
-        static supportXR(sessionMode) {
-            return WebXRExperienceHelper.xr_Manager.isSessionSupportedAsync(sessionMode).then(value => {
-                WebXRExperienceHelper.supported = value;
-                return value;
-            });
-        }
-        static enterXRAsync(sessionMode, referenceSpaceType, cameraInfo) {
-            if (sessionMode === "immersive-ar" && referenceSpaceType !== "unbounded") {
-                console.warn("We recommend using 'unbounded' reference space type when using 'immersive-ar' session mode");
-            }
-            return WebXRExperienceHelper.xr_Manager.initializeSessionAsync(sessionMode).then(() => {
-                return WebXRExperienceHelper.xr_Manager.setReferenceSpaceTypeAsync(referenceSpaceType);
-            }).then(() => {
-                return WebXRExperienceHelper.xr_Manager.initializeXRGL(sessionMode, Laya.LayaGL.renderEngine.gl);
-            }).then(() => {
-                WebXRExperienceHelper.glInstance = Laya.LayaGL.renderEngine.gl;
-                return WebXRExperienceHelper.xr_Manager.updateRenderStateAsync({
-                    depthFar: cameraInfo.depthFar,
-                    depthNear: cameraInfo.depthNear,
-                    baseLayer: new XRWebGLLayer(WebXRExperienceHelper.xr_Manager.session, Laya.LayaGL.renderEngine.gl),
-                });
-            }).then(() => {
-                WebXRExperienceHelper.xr_Manager.runXRRenderLoop();
-                return WebXRExperienceHelper.xr_Manager;
-            });
-        }
-        static setWebXRCamera(camera, manager) {
-            return new WebXRCameraManager(camera, manager);
-        }
-        static setWebXRInput(sessionManager, cameraManager) {
-            return new WebXRInputManager(sessionManager, cameraManager);
-        }
-    }
-    WebXRExperienceHelper.xr_Manager = new WebXRSessionManager();
-    WebXRExperienceHelper.supported = false;
-    WebXRExperienceHelper.canvasOptions = {
-        antialias: true,
-        depth: true,
-        stencil: false,
-        alpha: true,
-        multiview: false,
-        framebufferScaleFactor: 1,
-    };
 
     class ShaderDefine {
         constructor(index, value) {

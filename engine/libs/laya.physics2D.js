@@ -885,6 +885,47 @@
         }
     }
 
+    class PolygonCollider extends ColliderBase {
+        get points() {
+            return this._points;
+        }
+        set points(value) {
+            if (!value)
+                throw "PolygonCollider points cannot be empty";
+            this._points = value;
+            var arr = this._points.split(",");
+            let length = arr.length;
+            this._datas = [];
+            for (var i = 0, n = length; i < n; i++) {
+                this._datas.push(parseInt(arr[i]));
+            }
+            this._needupdataShapeAttribute();
+        }
+        get datas() {
+            return this._datas;
+        }
+        set datas(value) {
+            if (!value)
+                throw "PolygonCollider points cannot be empty";
+            this._datas = value;
+            this._needupdataShapeAttribute();
+        }
+        constructor() {
+            super();
+            this._points = "50,0,100,100,0,100";
+            this._datas = [50, 0, 100, 100, 0, 100];
+            this._physicShape = exports.PhysicsShape.PolygonShape;
+        }
+        _setShapeData(shape) {
+            var len = this.datas.length;
+            if (len < 6)
+                throw "PolygonCollider points must be greater than 3";
+            if (len % 2 == 1)
+                throw "PolygonCollider points lenth must a multiplier of 2";
+            Physics2D.I._factory.set_PolygonShape_data(shape, this.pivotoffx, this.pivotoffy, this.datas, this.scaleX, this.scaleY);
+        }
+    }
+
     class JointBase extends Laya.Component {
         get joint() {
             if (!this._joint)
@@ -1720,47 +1761,6 @@
         }
         PopTransform() {
             this._mG.restore();
-        }
-    }
-
-    class PolygonCollider extends ColliderBase {
-        get points() {
-            return this._points;
-        }
-        set points(value) {
-            if (!value)
-                throw "PolygonCollider points cannot be empty";
-            this._points = value;
-            var arr = this._points.split(",");
-            let length = arr.length;
-            this._datas = [];
-            for (var i = 0, n = length; i < n; i++) {
-                this._datas.push(parseInt(arr[i]));
-            }
-            this._needupdataShapeAttribute();
-        }
-        get datas() {
-            return this._datas;
-        }
-        set datas(value) {
-            if (!value)
-                throw "PolygonCollider points cannot be empty";
-            this._datas = value;
-            this._needupdataShapeAttribute();
-        }
-        constructor() {
-            super();
-            this._points = "50,0,100,100,0,100";
-            this._datas = [50, 0, 100, 100, 0, 100];
-            this._physicShape = exports.PhysicsShape.PolygonShape;
-        }
-        _setShapeData(shape) {
-            var len = this.datas.length;
-            if (len < 6)
-                throw "PolygonCollider points must be greater than 3";
-            if (len % 2 == 1)
-                throw "PolygonCollider points lenth must a multiplier of 2";
-            Physics2D.I._factory.set_PolygonShape_data(shape, this.pivotoffx, this.pivotoffy, this.datas, this.scaleX, this.scaleY);
         }
     }
 

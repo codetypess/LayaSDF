@@ -49,9 +49,13 @@ type MsdfDrawBatch = {
     fillColors: Uint32Array;
     outlineColors: Uint32Array;
     outlineParams: Float32Array;
+    glowColors: Uint32Array;
+    glowParams: Float32Array;
     textColor: Laya.Vector4;
     outlineColor: Laya.Vector4;
     outlineWidth: number;
+    glowColor: Laya.Vector4;
+    glowSize: number;
 };
 
 type MsdfDrawBatchGroup = {
@@ -61,6 +65,8 @@ type MsdfDrawBatchGroup = {
     fillColorChunks: Uint32Array[];
     outlineColorChunks: Uint32Array[];
     outlineParamChunks: Float32Array[];
+    glowColorChunks: Uint32Array[];
+    glowParamChunks: Float32Array[];
     vertexFloatCount: number;
     uvFloatCount: number;
     indexCount: number;
@@ -74,6 +80,8 @@ type MsdfTextOptions = {
     textColor?: Laya.Vector4;
     outlineColor?: Laya.Vector4;
     outlineWidth?: number;
+    glowColor?: Laya.Vector4;
+    glowSize?: number;
     underline?: boolean;
     strikethrough?: boolean;
 };
@@ -132,6 +140,7 @@ type MsdfRichTextLine = {
 
 const DEFAULT_TEXT_COLOR = new Laya.Vector4(1, 1, 1, 1);
 const DEFAULT_OUTLINE_COLOR = new Laya.Vector4(0, 0, 0, 1);
+const DEFAULT_GLOW_COLOR = new Laya.Vector4(1, 1, 1, 0);
 const ITALIC_SKEW_DEGREES = 12;
 const BOLD_SCALE_X = 1.04;
 const LARGE_DECORATION_SCALE_THRESHOLD = 1.75;
@@ -165,6 +174,8 @@ function createBatchGroup(batch: MsdfDrawBatch): MsdfDrawBatchGroup {
         fillColorChunks: [batch.fillColors],
         outlineColorChunks: [batch.outlineColors],
         outlineParamChunks: [batch.outlineParams],
+        glowColorChunks: [batch.glowColors],
+        glowParamChunks: [batch.glowParams],
         vertexFloatCount: batch.vertices.length,
         uvFloatCount: batch.uvs.length,
         indexCount: batch.indices.length,
@@ -181,9 +192,13 @@ function finalizeBatchGroup(group: MsdfDrawBatchGroup): MsdfDrawBatch {
             fillColors: group.fillColorChunks[0],
             outlineColors: group.outlineColorChunks[0],
             outlineParams: group.outlineParamChunks[0],
+            glowColors: group.glowColorChunks[0],
+            glowParams: group.glowParamChunks[0],
             textColor: DEFAULT_TEXT_COLOR,
             outlineColor: DEFAULT_OUTLINE_COLOR,
-            outlineWidth: 0
+            outlineWidth: 0,
+            glowColor: DEFAULT_GLOW_COLOR,
+            glowSize: 0
         };
     }
 
@@ -193,6 +208,8 @@ function finalizeBatchGroup(group: MsdfDrawBatchGroup): MsdfDrawBatch {
     const fillColors = new Uint32Array(group.vertexCount);
     const outlineColors = new Uint32Array(group.vertexCount);
     const outlineParams = new Float32Array(group.vertexCount);
+    const glowColors = new Uint32Array(group.vertexCount);
+    const glowParams = new Float32Array(group.vertexCount);
     let vertexFloatOffset = 0;
     let uvFloatOffset = 0;
     let indexOffset = 0;
@@ -206,12 +223,16 @@ function finalizeBatchGroup(group: MsdfDrawBatchGroup): MsdfDrawBatch {
         const fillColorChunk = group.fillColorChunks[i];
         const outlineColorChunk = group.outlineColorChunks[i];
         const outlineParamChunk = group.outlineParamChunks[i];
+        const glowColorChunk = group.glowColorChunks[i];
+        const glowParamChunk = group.glowParamChunks[i];
 
         vertices.set(vertexChunk, vertexFloatOffset);
         uvs.set(uvChunk, uvFloatOffset);
         fillColors.set(fillColorChunk, styleOffset);
         outlineColors.set(outlineColorChunk, styleOffset);
         outlineParams.set(outlineParamChunk, styleOffset);
+        glowColors.set(glowColorChunk, styleOffset);
+        glowParams.set(glowParamChunk, styleOffset);
 
         for (let j = 0; j < indexChunk.length; j++) {
             indices[indexOffset + j] = indexChunk[j] + vertexBase;
@@ -231,9 +252,13 @@ function finalizeBatchGroup(group: MsdfDrawBatchGroup): MsdfDrawBatch {
         fillColors,
         outlineColors,
         outlineParams,
+        glowColors,
+        glowParams,
         textColor: DEFAULT_TEXT_COLOR,
         outlineColor: DEFAULT_OUTLINE_COLOR,
-        outlineWidth: 0
+        outlineWidth: 0,
+        glowColor: DEFAULT_GLOW_COLOR,
+        glowSize: 0
     };
 }
 
@@ -256,6 +281,8 @@ function mergeBatchGroup(group: MsdfDrawBatchGroup, batch: MsdfDrawBatch): void 
     group.fillColorChunks.push(batch.fillColors);
     group.outlineColorChunks.push(batch.outlineColors);
     group.outlineParamChunks.push(batch.outlineParams);
+    group.glowColorChunks.push(batch.glowColors);
+    group.glowParamChunks.push(batch.glowParams);
     group.vertexFloatCount += batch.vertices.length;
     group.uvFloatCount += batch.uvs.length;
     group.indexCount += batch.indices.length;
@@ -291,6 +318,12 @@ function createVertexColorArray(color: Laya.Vector4, vertexCount: number): Uint3
 function createOutlineParamArray(outlineWidth: number, vertexCount: number): Float32Array {
     const values = new Float32Array(vertexCount);
     values.fill(outlineWidth);
+    return values;
+}
+
+function createGlowParamArray(glowSize: number, vertexCount: number): Float32Array {
+    const values = new Float32Array(vertexCount);
+    values.fill(glowSize);
     return values;
 }
 
@@ -689,6 +722,8 @@ export class MsdfTextSprite extends Laya.Sprite {
     private _textColor: Laya.Vector4;
     private _outlineColor: Laya.Vector4;
     private _outlineWidth: number;
+    private _glowColor: Laya.Vector4;
+    private _glowSize: number;
     private _underline: boolean;
     private _strikethrough: boolean;
     private _layout: MsdfLayout = createEmptyLayout();
@@ -711,6 +746,8 @@ export class MsdfTextSprite extends Laya.Sprite {
         this._textColor = options.textColor ?? DEFAULT_TEXT_COLOR.clone();
         this._outlineColor = options.outlineColor ?? DEFAULT_OUTLINE_COLOR.clone();
         this._outlineWidth = options.outlineWidth ?? 0;
+        this._glowColor = options.glowColor ?? DEFAULT_GLOW_COLOR.clone();
+        this._glowSize = options.glowSize ?? 0;
         this._underline = !!options.underline;
         this._strikethrough = !!options.strikethrough;
         this.materialInstance = this.font.renderState.material;
@@ -812,6 +849,21 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
     }
 
+    set glowColor(value: Laya.Vector4) {
+        this._glowColor = value;
+        this.refresh();
+    }
+
+    set glowSize(value: number) {
+        this._glowSize = Math.max(0, value);
+        this.refresh();
+    }
+
+    setGlowStyle(color: Laya.Vector4, size: number): void {
+        this._glowColor = color;
+        this._glowSize = Math.max(0, size);
+    }
+
     set underline(value: boolean) {
         if (this._underline === value) {
             return;
@@ -866,9 +918,13 @@ export class MsdfTextSprite extends Laya.Sprite {
                 fillColors: createVertexColorArray(this._textColor, this._layout.vertices.length >> 1),
                 outlineColors: createVertexColorArray(this._outlineColor, this._layout.vertices.length >> 1),
                 outlineParams: createOutlineParamArray(this._outlineWidth, this._layout.vertices.length >> 1),
+                glowColors: createVertexColorArray(this._glowColor, this._layout.vertices.length >> 1),
+                glowParams: createGlowParamArray(this._glowSize, this._layout.vertices.length >> 1),
                 textColor: this._textColor,
                 outlineColor: this._outlineColor,
-                outlineWidth: this._outlineWidth
+                outlineWidth: this._outlineWidth,
+                glowColor: this._glowColor,
+                glowSize: this._glowSize
             }]
             : [];
         this.size(this._layout.width, this._layout.height);
@@ -951,7 +1007,9 @@ export class MsdfTextSprite extends Laya.Sprite {
                 batch.indices,
                 batch.fillColors,
                 batch.outlineColors,
-                batch.outlineParams
+                batch.outlineParams,
+                batch.glowColors,
+                batch.glowParams
             );
         }
     }
@@ -1393,9 +1451,13 @@ export class MsdfTextSprite extends Laya.Sprite {
             fillColors: createVertexColorArray(style.textColor, vertices.length >> 1),
             outlineColors: createVertexColorArray(style.outlineColor, vertices.length >> 1),
             outlineParams: createOutlineParamArray(style.outlineWidth, vertices.length >> 1),
+            glowColors: createVertexColorArray(this._glowColor, vertices.length >> 1),
+            glowParams: createGlowParamArray(this._glowSize, vertices.length >> 1),
             textColor: style.textColor,
             outlineColor: style.outlineColor,
-            outlineWidth: style.outlineWidth
+            outlineWidth: style.outlineWidth,
+            glowColor: this._glowColor,
+            glowSize: this._glowSize
         };
     }
 }

@@ -16,6 +16,8 @@ Shader3D Start
         a_msdfFillColor: Vector4,
         a_msdfOutlineColor: Vector4,
         a_msdfParams: Float,
+        a_msdfGlowColor: Vector4,
+        a_msdfGlowParams: Float,
     },
     defines: {
         TEXTUREVS: { type: bool, default: true }
@@ -39,6 +41,8 @@ GLSL Start
     varying vec4 v_msdfFillColor;
     varying vec4 v_msdfOutlineColor;
     varying float v_msdfParams;
+    varying vec4 v_msdfGlowColor;
+    varying float v_msdfGlowParams;
 
     void main() {
         vertexInfo info;
@@ -51,6 +55,8 @@ GLSL Start
         v_msdfFillColor = a_msdfFillColor;
         v_msdfOutlineColor = a_msdfOutlineColor;
         v_msdfParams = a_msdfParams;
+        v_msdfGlowColor = a_msdfGlowColor;
+        v_msdfGlowParams = a_msdfGlowParams;
 
         vec4 pos;
         getPosition(pos);
@@ -77,6 +83,8 @@ GLSL Start
     varying vec4 v_msdfFillColor;
     varying vec4 v_msdfOutlineColor;
     varying float v_msdfParams;
+    varying vec4 v_msdfGlowColor;
+    varying float v_msdfGlowParams;
 
     float median3(float r, float g, float b) {
         return max(min(r, g), min(max(r, g), b));
@@ -99,12 +107,18 @@ GLSL Start
         vec4 fillColor = v_msdfFillColor;
         vec4 outlineColor = v_msdfOutlineColor;
         float outlineWidth = v_msdfParams;
+        vec4 glowColor = v_msdfGlowColor;
+        float glowSize = v_msdfGlowParams;
 
         float fillAlpha = clamp(screenDistance + 0.5, 0.0, 1.0);
         float strokeAlpha = clamp(screenDistance + outlineWidth + 0.5, 0.0, 1.0);
         float outlineAlpha = max(strokeAlpha - fillAlpha, 0.0);
+        float outsideDistance = max(-(screenDistance + outlineWidth), 0.0);
+        float glowAlpha = glowSize > 0.0
+            ? (1.0 - smoothstep(0.0, glowSize, outsideDistance)) * (1.0 - strokeAlpha)
+            : 0.0;
 
-        vec4 color = outlineColor * outlineAlpha + fillColor * fillAlpha;
+        vec4 color = glowColor * glowAlpha + outlineColor * outlineAlpha + fillColor * fillAlpha;
 
         setglColor(color);
     }

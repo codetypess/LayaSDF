@@ -76,6 +76,8 @@ export class MsdfLabel extends Laya.UIComponent {
     private _padding = "0,0,0,0";
     private _stroke = 0;
     private _strokeColor = "#000000";
+    private _glow = 0;
+    private _glowColor = "#ffffff";
     private _bgColor = "";
     private _borderColor = "";
     private _wordWrap = false;
@@ -235,6 +237,31 @@ export class MsdfLabel extends Laya.UIComponent {
         this.callLater(this.changeText);
     }
 
+    get glow(): number {
+        return this._glow;
+    }
+
+    set glow(value: number) {
+        const next = Math.max(0, value || 0);
+        if (this._glow === next) {
+            return;
+        }
+        this._glow = next;
+        this.callLater(this.changeText);
+    }
+
+    get glowColor(): string {
+        return this._glowColor;
+    }
+
+    set glowColor(value: string) {
+        if (this._glowColor === value) {
+            return;
+        }
+        this._glowColor = value || "#ffffff";
+        this.callLater(this.changeText);
+    }
+
     get bgColor(): string {
         return this._bgColor;
     }
@@ -391,11 +418,11 @@ export class MsdfLabel extends Laya.UIComponent {
     }
 
     protected measureWidth(): number {
-        return (this._textSprite?.contentWidth ?? 0) + this._paddingValues[1] + this._paddingValues[3];
+        return (this._textSprite?.contentWidth ?? 0) + this._paddingValues[1] + this._paddingValues[3] + this.getGlowPadding() * 2;
     }
 
     protected measureHeight(): number {
-        return (this._textSprite?.contentHeight ?? 0) + this._paddingValues[0] + this._paddingValues[2];
+        return (this._textSprite?.contentHeight ?? 0) + this._paddingValues[0] + this._paddingValues[2] + this.getGlowPadding() * 2;
     }
 
     protected commitMeasure(): void {
@@ -560,14 +587,19 @@ export class MsdfLabel extends Laya.UIComponent {
         return runs;
     }
 
+    private getGlowPadding(): number {
+        return this._glow > 0 ? Math.ceil(this._glow) : 0;
+    }
+
     private changeText(): void {
         if (!this._font || !this._textSprite) {
             return;
         }
 
         const padding = this._paddingValues;
+        const glowPadding = this.getGlowPadding();
         const availableWidth = this._hasExplicitWidth
-            ? Math.max(this.width - padding[1] - padding[3], 0)
+            ? Math.max(this.width - padding[1] - padding[3] - glowPadding * 2, 0)
             : 0;
         const wrapWidth = this._wordWrap && this._hasExplicitWidth ? availableWidth : 0;
 
@@ -576,6 +608,7 @@ export class MsdfLabel extends Laya.UIComponent {
         this._textSprite.letterSpacing = this._letterSpacing;
         this._textSprite.lineSpacing = this._leading;
         this._textSprite.defaultAlign = this._align;
+        this._textSprite.setGlowStyle(colorToVector4(this._glowColor), this._glow);
         this._textSprite.setRuns(this.buildTextRuns());
         this._textSprite.refresh();
         this.updateLayoutFrame();
@@ -587,14 +620,17 @@ export class MsdfLabel extends Laya.UIComponent {
         }
 
         const padding = this._paddingValues;
-        const measuredWidth = this._textSprite.contentWidth + padding[1] + padding[3];
-        const measuredHeight = this._textSprite.contentHeight + padding[0] + padding[2];
+        const glowPadding = this.getGlowPadding();
+        const measuredWidth = this._textSprite.contentWidth + padding[1] + padding[3] + glowPadding * 2;
+        const measuredHeight = this._textSprite.contentHeight + padding[0] + padding[2] + glowPadding * 2;
         const layoutWidth = this._hasExplicitWidth ? this.width : measuredWidth;
         const layoutHeight = this._hasExplicitHeight ? this.height : measuredHeight;
-        const availableHeight = this._hasExplicitHeight ? Math.max(layoutHeight - padding[0] - padding[2], 0) : this._textSprite.contentHeight;
+        const availableHeight = this._hasExplicitHeight
+            ? Math.max(layoutHeight - padding[0] - padding[2] - glowPadding * 2, 0)
+            : this._textSprite.contentHeight;
 
-        const x = padding[3];
-        let y = padding[0];
+        const x = padding[3] + glowPadding;
+        let y = padding[0] + glowPadding;
         if (this._valign === "middle") {
             y += Math.max((availableHeight - this._textSprite.contentHeight) * 0.5, 0);
         } else if (this._valign === "bottom") {
