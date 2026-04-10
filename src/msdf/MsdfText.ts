@@ -218,6 +218,7 @@ type MsdfRichTextLineSegment = {
 const DEFAULT_TEXT_COLOR = new Laya.Vector4(1, 1, 1, 1);
 const DEFAULT_OUTLINE_COLOR = new Laya.Vector4(0, 0, 0, 1);
 const DEFAULT_GLOW_COLOR = new Laya.Vector4(1, 1, 1, 0);
+const NO_CONSTRAINT = -1;
 const DEFAULT_SHADOW_COLOR = new Laya.Vector4(0, 0, 0, 0);
 const ITALIC_SKEW_DEGREES = 12;
 const BOLD_SCALE_X = 1.04;
@@ -969,17 +970,17 @@ export class MsdfTextSprite extends Laya.Sprite {
     private _runs: MsdfRichTextRun[] = [];
     private _usesRuns = false;
     private _wordWrapWidth = 0;
-    private _layoutWidth = 0;
-    private _layoutHeight = 0;
+    private _layoutWidth = NO_CONSTRAINT;
+    private _layoutHeight = NO_CONSTRAINT;
     private _viewFrame: MsdfViewFrame = {
-        width: 0,
-        height: 0,
+        width: NO_CONSTRAINT,
+        height: NO_CONSTRAINT,
         drawOffsetX: 0,
         drawOffsetY: 0,
         clipRectX: 0,
         clipRectY: 0,
-        clipRectWidth: 0,
-        clipRectHeight: 0
+        clipRectWidth: NO_CONSTRAINT,
+        clipRectHeight: NO_CONSTRAINT
     };
     private _defaultAlign = "left";
     private _alignItems = "middle";
@@ -1076,7 +1077,7 @@ export class MsdfTextSprite extends Laya.Sprite {
     }
 
     set layoutWidth(value: number) {
-        this._layoutWidth = Math.max(0, value);
+        this._layoutWidth = Number.isFinite(value) && value >= 0 ? value : NO_CONSTRAINT;
     }
 
     get layoutHeight(): number {
@@ -1084,7 +1085,7 @@ export class MsdfTextSprite extends Laya.Sprite {
     }
 
     set layoutHeight(value: number) {
-        this._layoutHeight = Math.max(0, value);
+        this._layoutHeight = Number.isFinite(value) && value >= 0 ? value : NO_CONSTRAINT;
     }
 
     get defaultAlign(): string {
@@ -1156,12 +1157,12 @@ export class MsdfTextSprite extends Laya.Sprite {
     }
 
     get maxScrollX(): number {
-        const viewportWidth = this._layoutWidth > 0 ? this._layoutWidth : this.width;
+        const viewportWidth = this._layoutWidth >= 0 ? this._layoutWidth : this.width;
         return Math.max(this._contentWidth - viewportWidth, 0);
     }
 
     get maxScrollY(): number {
-        const viewportHeight = this._layoutHeight > 0 ? this._layoutHeight : this.height;
+        const viewportHeight = this._layoutHeight >= 0 ? this._layoutHeight : this.height;
         return Math.max(this._contentHeight - viewportHeight, 0);
     }
 
@@ -1289,8 +1290,8 @@ export class MsdfTextSprite extends Laya.Sprite {
             return 1;
         }
 
-        const limitWidth = this._layoutWidth > 0 ? this._layoutWidth : Number.POSITIVE_INFINITY;
-        const limitHeight = this._layoutHeight > 0 ? this._layoutHeight : Number.POSITIVE_INFINITY;
+        const limitWidth = this._layoutWidth >= 0 ? this._layoutWidth : Number.POSITIVE_INFINITY;
+        const limitHeight = this._layoutHeight >= 0 ? this._layoutHeight : Number.POSITIVE_INFINITY;
         let scale = 1;
 
         if (Number.isFinite(limitWidth) && contentWidth > limitWidth && contentWidth > 0) {
@@ -1316,11 +1317,11 @@ export class MsdfTextSprite extends Laya.Sprite {
     }
 
     private getViewWidth(): number {
-        if (this._viewFrame.width > 0) {
+        if (this._viewFrame.width >= 0) {
             return this._viewFrame.width;
         }
 
-        if (this._layoutWidth > 0) {
+        if (this._layoutWidth >= 0) {
             return this._layoutWidth;
         }
 
@@ -1328,11 +1329,11 @@ export class MsdfTextSprite extends Laya.Sprite {
     }
 
     private getViewHeight(): number {
-        if (this._viewFrame.height > 0) {
+        if (this._viewFrame.height >= 0) {
             return this._viewFrame.height;
         }
 
-        if (this._layoutHeight > 0) {
+        if (this._layoutHeight >= 0) {
             return this._layoutHeight;
         }
 
@@ -1874,7 +1875,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         this._contentHeight *= shrinkScale;
         this._lines = this.buildRichTextLineMetrics(lines, shrinkScale);
         this.clampScroll();
-        const contentBoxWidth = this._layoutWidth > 0 ? this._layoutWidth : this._contentWidth;
+        const contentBoxWidth = this._layoutWidth >= 0 ? this._layoutWidth : this._contentWidth;
         const drawBatches: MsdfDrawBatch[] = [];
         // 富文本里同样的“文本片段 + 样式”组合可能重复出现。
         // 先缓存每个 run 的布局，再把可合并的 run 拼成更大的 GPU batch。
@@ -1937,9 +1938,14 @@ export class MsdfTextSprite extends Laya.Sprite {
 
         this.syncMaterial();
 
-        const clipWidth = this._viewFrame.clipRectWidth > 0 ? this._viewFrame.clipRectWidth : this.width;
-        const clipHeight = this._viewFrame.clipRectHeight > 0 ? this._viewFrame.clipRectHeight : this.height;
-        const clipped = (this._overflow === "hidden" || this._overflow === "scroll") && clipWidth > 0 && clipHeight > 0;
+        const clipWidth = this._viewFrame.clipRectWidth >= 0 ? this._viewFrame.clipRectWidth : this.width;
+        const clipHeight = this._viewFrame.clipRectHeight >= 0 ? this._viewFrame.clipRectHeight : this.height;
+        const needsClip = this._overflow === "hidden" || this._overflow === "scroll";
+        if (needsClip && (clipWidth <= 0 || clipHeight <= 0)) {
+            return;
+        }
+
+        const clipped = needsClip;
         if (clipped) {
             this.graphics.save();
             this.graphics.clipRect(this._viewFrame.clipRectX, this._viewFrame.clipRectY, clipWidth, clipHeight);
@@ -1989,10 +1995,10 @@ export class MsdfTextSprite extends Laya.Sprite {
         const noBreakWord = wordWrap;
         const rectWidth = wordWrap
             ? this._wordWrapWidth
-            : this._layoutWidth > 0
+            : this._layoutWidth >= 0
                 ? this._layoutWidth
                 : Number.MAX_VALUE;
-        const rectHeight = this._layoutHeight > 0 ? this._layoutHeight : Number.MAX_VALUE;
+        const rectHeight = this._layoutHeight >= 0 ? this._layoutHeight : Number.MAX_VALUE;
         const metricCache: MsdfRichTextMetricCache = new WeakMap();
 
         let lineX = 0;

@@ -67,6 +67,22 @@ export class TestOverflow extends Laya.Script {
 
         this.owner.addChild(this.createPaddingOverlay(label));
         this.owner.addChild(this.createNote(`padding=${label.padding}，绿色框是内容区，黄色十字是内容原点。`));
+
+        const zeroHeightLabel = this.createMsdfLabel("overflow=hidden 且 height=0 时不应该再看到任何文字。");
+        zeroHeightLabel.x = PANEL_X + CONTENT_PADDING;
+        zeroHeightLabel.y = PANEL_Y + CONTENT_PADDING + 168;
+        zeroHeightLabel.font = "demo-msdf";
+        zeroHeightLabel.fontSize = 28;
+        zeroHeightLabel.wordWrap = true;
+        zeroHeightLabel.overflow = "hidden";
+        zeroHeightLabel.size(290, 0);
+        zeroHeightLabel.padding = "10,10,10,10";
+        zeroHeightLabel.bgColor = "#16263a";
+        zeroHeightLabel.borderColor = "#35506d";
+        this.owner.addChild(zeroHeightLabel);
+
+        this.owner.addChild(this.createPaddingOverlay(zeroHeightLabel));
+        this.owner.addChild(this.createZeroHeightNote("overflow=hidden + height=0：应完全不渲染文本。"));
     }
 
     private createMsdfLabel(text: string): MsdfLabel {
@@ -100,6 +116,18 @@ export class TestOverflow extends Laya.Script {
         note.wordWrap = true;
         note.leading = 6;
         note.pos(PANEL_X + CONTENT_PADDING, PANEL_Y + CONTENT_PADDING + 96);
+        return note;
+    }
+
+    private createZeroHeightNote(text: string): Laya.Label {
+        const note = new Laya.Label();
+        note.text = text;
+        note.fontSize = 22;
+        note.color = "#9fb7cf";
+        note.width = 640;
+        note.wordWrap = true;
+        note.leading = 6;
+        note.pos(PANEL_X + CONTENT_PADDING, PANEL_Y + CONTENT_PADDING + 208);
         return note;
     }
 }

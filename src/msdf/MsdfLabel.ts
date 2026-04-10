@@ -762,7 +762,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
 
-        this._hasExplicitWidth = value > 0;
+        this._hasExplicitWidth = Number.isFinite(value) && value >= 0;
         super.set_width(value);
     }
 
@@ -771,7 +771,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
 
-        this._hasExplicitHeight = value > 0;
+        this._hasExplicitHeight = Number.isFinite(value) && value >= 0;
         super.set_height(value);
     }
 
@@ -1123,8 +1123,8 @@ export class MsdfLabel extends Laya.UIComponent {
             ? widthLimit
             : 0;
 
-        this._textSprite.layoutWidth = this._hasExplicitWidth ? Math.max(availableWidth, 0) : 0;
-        this._textSprite.layoutHeight = availableHeight;
+        this._textSprite.layoutWidth = this._hasExplicitWidth ? Math.max(availableWidth, 0) : -1;
+        this._textSprite.layoutHeight = this._hasExplicitHeight ? availableHeight : -1;
         this._textSprite.wordWrapWidth = wrapWidth;
         this._textSprite.letterSpacing = this._letterSpacing;
         this._textSprite.lineSpacing = this._leading;
