@@ -21,6 +21,10 @@ label.stroke = 1.5;
 label.strokeColor = "#000000";
 label.glow = 6;
 label.glowColor = "#7dd3fc99";
+label.shadowColor = "#00000099";
+label.shadowBlur = 2;
+label.shadowOffsetX = 3;
+label.shadowOffsetY = 3;
 label.wordWrap = true;
 label.leading = 8;
 label.letterSpacing = 1;
@@ -44,6 +48,10 @@ Supported common properties:
 - `strokeColor`
 - `glow`
 - `glowColor`
+- `shadowColor`
+- `shadowBlur`
+- `shadowOffsetX`
+- `shadowOffsetY`
 - `wordWrap`
 - `leading`
 - `letterSpacing`

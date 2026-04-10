@@ -557,209 +557,6 @@
             Laya.LayaGL.unitRenderModuleDataFactory = new WebUnitRenderModuleDataFactory();
     });
 
-    class WebGPUCapable {
-        constructor(descriptor) {
-            this.initCapable(descriptor);
-        }
-        initCapable(descriptor) {
-            this._capabilityMap = new Map();
-            this._capabilityMap.set(Laya.RenderCapable.Element_Index_Uint32, true);
-            this._capabilityMap.set(Laya.RenderCapable.TextureFormat_R32G32B32A32, true);
-            this._capabilityMap.set(Laya.RenderCapable.TextureFormat_R16G16B16A16, true);
-            this._capabilityMap.set(Laya.RenderCapable.Texture_anisotropic, true);
-            this._capabilityMap.set(Laya.RenderCapable.RenderTextureFormat_R16G16B16A16, true);
-            this._capabilityMap.set(Laya.RenderCapable.RenderTextureFormat_Depth, true);
-            this._capabilityMap.set(Laya.RenderCapable.RenderTextureFormat_ShadowMap, true);
-            this._capabilityMap.set(Laya.RenderCapable.Vertex_VAO, true);
-            this._capabilityMap.set(Laya.RenderCapable.DrawElement_Instance, true);
-            this._capabilityMap.set(Laya.RenderCapable.Shader_TextureLod, true);
-            this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_S3TC, false);
-            this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_S3TC_SRGB, false);
-            this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_PVRTC, false);
-            this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_ETC1, false);
-            this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_ETC, false);
-            this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_ASTC, false);
-            this._capabilityMap.set(Laya.RenderCapable.Texture_SRGB, true);
-            this._capabilityMap.set(Laya.RenderCapable.MSAA, true);
-            this._capabilityMap.set(Laya.RenderCapable.UnifromBufferObject, false);
-            this._capabilityMap.set(Laya.RenderCapable.Texture3D, true);
-            this._capabilityMap.set(Laya.RenderCapable.Texture_HalfFloatLinearFiltering, true);
-            this._capabilityMap.set(Laya.RenderCapable.RenderTextureFormat_R32G32B32A32, true);
-            this._capabilityMap.set(Laya.RenderCapable.RenderTextureFormat_R16G16B16A16, true);
-            let features = descriptor.requiredFeatures;
-            for (const iterator of features) {
-                switch (iterator) {
-                    case "texture-compression-astc":
-                        this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_ASTC, true);
-                        break;
-                    case "texture-compression-bc":
-                        this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_S3TC, true);
-                        this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_S3TC_SRGB, true);
-                        break;
-                    case "texture-compression-etc2":
-                        this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_ETC1, true);
-                        this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_ETC, true);
-                        break;
-                    case "float32-filterable":
-                        this._capabilityMap.set(Laya.RenderCapable.Texture_FloatLinearFiltering, true);
-                        break;
-                }
-            }
-        }
-        getCapable(type) {
-            return this._capabilityMap.get(type);
-        }
-    }
-
-    class WebGPUStatis {
-        static startFrame() {
-            this._frameStatis.submit = 0;
-            this._frameStatis.uploadNum = 0;
-            this._frameStatis.uploadBytes = 0;
-            this._frameStatis.renderElement = 0;
-        }
-        static addUploadNum(n = 1) {
-            this._frameStatis.uploadNum += n;
-        }
-        static addUploadBytes(n = 1) {
-            this._frameStatis.uploadBytes += n;
-        }
-        static addRenderElement(n = 1) {
-            this._frameStatis.renderElement += n;
-        }
-        static addSubmit(n = 1) {
-            this._frameStatis.submit += n;
-        }
-        static addTexture(texture) {
-            this._textureStatis.push(texture);
-        }
-        static trackObjectCreation(name, id, object, memory) {
-            const time = Date.now() - this._start;
-            this._dataTiming.push({ action: 'create', name, id, time, memory, object });
-            if (!this._dataCreate[name])
-                this._dataCreate[name] = { id: [], count: 0, time: [], memory: 0, object: [] };
-            this._dataCreate[name].id.push(id);
-            this._dataCreate[name].count++;
-            this._dataCreate[name].time.push(time);
-            this._dataCreate[name].memory += memory;
-            this._dataCreate[name].object.push(object);
-            this._totalStatis.memory += memory;
-        }
-        static trackObjectRelease(name, id, object, memory) {
-            const time = Date.now() - this._start;
-            this._dataTiming.push({ action: 'release', name, id, time, memory, object });
-            if (!this._dataRelease[name])
-                this._dataRelease[name] = { id: [], count: 0, time: [], memory: 0, object: [] };
-            this._dataRelease[name].id.push(id);
-            this._dataRelease[name].count++;
-            this._dataRelease[name].time.push(time);
-            this._dataRelease[name].memory += memory;
-            this._dataRelease[name].object.push(object);
-            this._totalStatis.memory -= memory;
-        }
-        static trackObjectAction(name, id, action, object, memory) {
-            const time = Date.now() - this._start;
-            this._dataTiming.push({ action, name, id, time, memory, object });
-            this._totalStatis.memory += memory;
-        }
-        static printStatisticsAsTable() {
-            if (this._dataTiming.length > 0) {
-                console.log('timing statistics: ');
-                console.table(this._dataTiming);
-            }
-            if (Object.keys(this._dataCreate).length > 0) {
-                console.log('object creation statistics: ');
-                console.table(this._dataCreate);
-            }
-            if (Object.keys(this._dataRelease).length > 0) {
-                console.log('object release statistics: ');
-                console.table(this._dataRelease);
-            }
-        }
-        static printTotalStatis() {
-            console.table(this._totalStatis);
-        }
-        static printFrameStatis() {
-            console.table(this._frameStatis);
-        }
-        static printTextureStatis() {
-            console.log('texture statistics: ');
-            console.table(this._textureStatis);
-        }
-    }
-    WebGPUStatis._start = Date.now();
-    WebGPUStatis._totalStatis = { memory: 0 };
-    WebGPUStatis._frameStatis = {};
-    WebGPUStatis._dataTiming = [];
-    WebGPUStatis._dataCreate = {};
-    WebGPUStatis._dataRelease = {};
-    WebGPUStatis._textureStatis = [];
-
-    class WebGPUGlobal {
-        static getUniformInfoId() {
-            return this._uniformInfoIdCounter++;
-        }
-        static getId(object) {
-            if (this.debug && object)
-                WebGPUStatis.trackObjectCreation(object.objectName || 'unknown', this._idCounter, object, 0);
-            return this._idCounter++;
-        }
-        static releaseId(object) {
-            if (this.debug && object)
-                WebGPUStatis.trackObjectRelease(object.objectName || 'unknown', object.globalId, object, 0);
-        }
-        static action(object, action, memory = 0) {
-            if (this.debug && object)
-                WebGPUStatis.trackObjectAction(object.objectName || 'unknown', object.globalId, action, object, memory);
-        }
-        static reset() {
-            this._idCounter = 0;
-        }
-        static get idCounter() {
-            return this._idCounter;
-        }
-    }
-    WebGPUGlobal.debug = false;
-    WebGPUGlobal.useCache = true;
-    WebGPUGlobal.useBundle = true;
-    WebGPUGlobal.useBigBuffer = true;
-    WebGPUGlobal.useGlobalContext = true;
-    WebGPUGlobal._idCounter = 0;
-    WebGPUGlobal._uniformInfoIdCounter = 0;
-
-    class WebGPUBufferManager extends Laya.UniformBufferManager {
-        constructor(useBigBuffer) {
-            super(useBigBuffer);
-            this.objectName = 'WebGPUBufferManager';
-            this.globalId = WebGPUGlobal.getId(this);
-        }
-        destroy() {
-            if (super.destroy())
-                return true;
-            return false;
-        }
-        createGPUBuffer(size, name) {
-            return this.renderContext.device.createBuffer({
-                label: name,
-                size,
-                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-            });
-        }
-        writeBuffer(buffer, data, offset, size) {
-            this.renderContext.device.queue.writeBuffer(buffer, offset, data, offset, size);
-        }
-        statisGPUMemory(bytes) {
-            WebGPURenderEngine._instance._addStatisticsInfo(Laya.GPUEngineStatisticsInfo.M_GPUMemory, bytes);
-            WebGPURenderEngine._instance._addStatisticsInfo(Laya.GPUEngineStatisticsInfo.M_GPUBuffer, bytes);
-            WebGPUGlobal.action(this, 'expandMemory | uniform', bytes);
-        }
-        statisUpload(count, bytes) {
-            WebGPURenderEngine._instance._addStatisticsInfo(Laya.GPUEngineStatisticsInfo.C_UniformBufferUploadCount, count);
-            WebGPUStatis.addUploadNum(count);
-            WebGPUStatis.addUploadBytes(bytes);
-        }
-    }
-
     class WebGPUShaderDefine {
         static findNumberDefine(code, map) {
             const pattern = /^\s*#define\s+(\w+)\s+([1-9]\d*)(?=\s*($|\/\/))/gm;
@@ -2609,6 +2406,209 @@
                         break;
                 }
             }
+        }
+    }
+
+    class WebGPUCapable {
+        constructor(descriptor) {
+            this.initCapable(descriptor);
+        }
+        initCapable(descriptor) {
+            this._capabilityMap = new Map();
+            this._capabilityMap.set(Laya.RenderCapable.Element_Index_Uint32, true);
+            this._capabilityMap.set(Laya.RenderCapable.TextureFormat_R32G32B32A32, true);
+            this._capabilityMap.set(Laya.RenderCapable.TextureFormat_R16G16B16A16, true);
+            this._capabilityMap.set(Laya.RenderCapable.Texture_anisotropic, true);
+            this._capabilityMap.set(Laya.RenderCapable.RenderTextureFormat_R16G16B16A16, true);
+            this._capabilityMap.set(Laya.RenderCapable.RenderTextureFormat_Depth, true);
+            this._capabilityMap.set(Laya.RenderCapable.RenderTextureFormat_ShadowMap, true);
+            this._capabilityMap.set(Laya.RenderCapable.Vertex_VAO, true);
+            this._capabilityMap.set(Laya.RenderCapable.DrawElement_Instance, true);
+            this._capabilityMap.set(Laya.RenderCapable.Shader_TextureLod, true);
+            this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_S3TC, false);
+            this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_S3TC_SRGB, false);
+            this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_PVRTC, false);
+            this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_ETC1, false);
+            this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_ETC, false);
+            this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_ASTC, false);
+            this._capabilityMap.set(Laya.RenderCapable.Texture_SRGB, true);
+            this._capabilityMap.set(Laya.RenderCapable.MSAA, true);
+            this._capabilityMap.set(Laya.RenderCapable.UnifromBufferObject, false);
+            this._capabilityMap.set(Laya.RenderCapable.Texture3D, true);
+            this._capabilityMap.set(Laya.RenderCapable.Texture_HalfFloatLinearFiltering, true);
+            this._capabilityMap.set(Laya.RenderCapable.RenderTextureFormat_R32G32B32A32, true);
+            this._capabilityMap.set(Laya.RenderCapable.RenderTextureFormat_R16G16B16A16, true);
+            let features = descriptor.requiredFeatures;
+            for (const iterator of features) {
+                switch (iterator) {
+                    case "texture-compression-astc":
+                        this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_ASTC, true);
+                        break;
+                    case "texture-compression-bc":
+                        this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_S3TC, true);
+                        this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_S3TC_SRGB, true);
+                        break;
+                    case "texture-compression-etc2":
+                        this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_ETC1, true);
+                        this._capabilityMap.set(Laya.RenderCapable.COMPRESS_TEXTURE_ETC, true);
+                        break;
+                    case "float32-filterable":
+                        this._capabilityMap.set(Laya.RenderCapable.Texture_FloatLinearFiltering, true);
+                        break;
+                }
+            }
+        }
+        getCapable(type) {
+            return this._capabilityMap.get(type);
+        }
+    }
+
+    class WebGPUStatis {
+        static startFrame() {
+            this._frameStatis.submit = 0;
+            this._frameStatis.uploadNum = 0;
+            this._frameStatis.uploadBytes = 0;
+            this._frameStatis.renderElement = 0;
+        }
+        static addUploadNum(n = 1) {
+            this._frameStatis.uploadNum += n;
+        }
+        static addUploadBytes(n = 1) {
+            this._frameStatis.uploadBytes += n;
+        }
+        static addRenderElement(n = 1) {
+            this._frameStatis.renderElement += n;
+        }
+        static addSubmit(n = 1) {
+            this._frameStatis.submit += n;
+        }
+        static addTexture(texture) {
+            this._textureStatis.push(texture);
+        }
+        static trackObjectCreation(name, id, object, memory) {
+            const time = Date.now() - this._start;
+            this._dataTiming.push({ action: 'create', name, id, time, memory, object });
+            if (!this._dataCreate[name])
+                this._dataCreate[name] = { id: [], count: 0, time: [], memory: 0, object: [] };
+            this._dataCreate[name].id.push(id);
+            this._dataCreate[name].count++;
+            this._dataCreate[name].time.push(time);
+            this._dataCreate[name].memory += memory;
+            this._dataCreate[name].object.push(object);
+            this._totalStatis.memory += memory;
+        }
+        static trackObjectRelease(name, id, object, memory) {
+            const time = Date.now() - this._start;
+            this._dataTiming.push({ action: 'release', name, id, time, memory, object });
+            if (!this._dataRelease[name])
+                this._dataRelease[name] = { id: [], count: 0, time: [], memory: 0, object: [] };
+            this._dataRelease[name].id.push(id);
+            this._dataRelease[name].count++;
+            this._dataRelease[name].time.push(time);
+            this._dataRelease[name].memory += memory;
+            this._dataRelease[name].object.push(object);
+            this._totalStatis.memory -= memory;
+        }
+        static trackObjectAction(name, id, action, object, memory) {
+            const time = Date.now() - this._start;
+            this._dataTiming.push({ action, name, id, time, memory, object });
+            this._totalStatis.memory += memory;
+        }
+        static printStatisticsAsTable() {
+            if (this._dataTiming.length > 0) {
+                console.log('timing statistics: ');
+                console.table(this._dataTiming);
+            }
+            if (Object.keys(this._dataCreate).length > 0) {
+                console.log('object creation statistics: ');
+                console.table(this._dataCreate);
+            }
+            if (Object.keys(this._dataRelease).length > 0) {
+                console.log('object release statistics: ');
+                console.table(this._dataRelease);
+            }
+        }
+        static printTotalStatis() {
+            console.table(this._totalStatis);
+        }
+        static printFrameStatis() {
+            console.table(this._frameStatis);
+        }
+        static printTextureStatis() {
+            console.log('texture statistics: ');
+            console.table(this._textureStatis);
+        }
+    }
+    WebGPUStatis._start = Date.now();
+    WebGPUStatis._totalStatis = { memory: 0 };
+    WebGPUStatis._frameStatis = {};
+    WebGPUStatis._dataTiming = [];
+    WebGPUStatis._dataCreate = {};
+    WebGPUStatis._dataRelease = {};
+    WebGPUStatis._textureStatis = [];
+
+    class WebGPUGlobal {
+        static getUniformInfoId() {
+            return this._uniformInfoIdCounter++;
+        }
+        static getId(object) {
+            if (this.debug && object)
+                WebGPUStatis.trackObjectCreation(object.objectName || 'unknown', this._idCounter, object, 0);
+            return this._idCounter++;
+        }
+        static releaseId(object) {
+            if (this.debug && object)
+                WebGPUStatis.trackObjectRelease(object.objectName || 'unknown', object.globalId, object, 0);
+        }
+        static action(object, action, memory = 0) {
+            if (this.debug && object)
+                WebGPUStatis.trackObjectAction(object.objectName || 'unknown', object.globalId, action, object, memory);
+        }
+        static reset() {
+            this._idCounter = 0;
+        }
+        static get idCounter() {
+            return this._idCounter;
+        }
+    }
+    WebGPUGlobal.debug = false;
+    WebGPUGlobal.useCache = true;
+    WebGPUGlobal.useBundle = true;
+    WebGPUGlobal.useBigBuffer = true;
+    WebGPUGlobal.useGlobalContext = true;
+    WebGPUGlobal._idCounter = 0;
+    WebGPUGlobal._uniformInfoIdCounter = 0;
+
+    class WebGPUBufferManager extends Laya.UniformBufferManager {
+        constructor(useBigBuffer) {
+            super(useBigBuffer);
+            this.objectName = 'WebGPUBufferManager';
+            this.globalId = WebGPUGlobal.getId(this);
+        }
+        destroy() {
+            if (super.destroy())
+                return true;
+            return false;
+        }
+        createGPUBuffer(size, name) {
+            return this.renderContext.device.createBuffer({
+                label: name,
+                size,
+                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+            });
+        }
+        writeBuffer(buffer, data, offset, size) {
+            this.renderContext.device.queue.writeBuffer(buffer, offset, data, offset, size);
+        }
+        statisGPUMemory(bytes) {
+            WebGPURenderEngine._instance._addStatisticsInfo(Laya.GPUEngineStatisticsInfo.M_GPUMemory, bytes);
+            WebGPURenderEngine._instance._addStatisticsInfo(Laya.GPUEngineStatisticsInfo.M_GPUBuffer, bytes);
+            WebGPUGlobal.action(this, 'expandMemory | uniform', bytes);
+        }
+        statisUpload(count, bytes) {
+            WebGPURenderEngine._instance._addStatisticsInfo(Laya.GPUEngineStatisticsInfo.C_UniformBufferUploadCount, count);
+            WebGPUStatis.addUploadNum(count);
+            WebGPUStatis.addUploadBytes(bytes);
         }
     }
 

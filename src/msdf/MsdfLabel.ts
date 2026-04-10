@@ -78,6 +78,10 @@ export class MsdfLabel extends Laya.UIComponent {
     private _strokeColor = "#000000";
     private _glow = 0;
     private _glowColor = "#ffffff";
+    private _shadowColor = "#000000";
+    private _shadowBlur = 0;
+    private _shadowOffsetX = 0;
+    private _shadowOffsetY = 0;
     private _bgColor = "";
     private _borderColor = "";
     private _wordWrap = false;
@@ -262,6 +266,55 @@ export class MsdfLabel extends Laya.UIComponent {
         this.callLater(this.changeText);
     }
 
+    get shadowColor(): string {
+        return this._shadowColor;
+    }
+
+    set shadowColor(value: string) {
+        if (this._shadowColor === value) {
+            return;
+        }
+        this._shadowColor = value || "#000000";
+        this.callLater(this.changeText);
+    }
+
+    get shadowBlur(): number {
+        return this._shadowBlur;
+    }
+
+    set shadowBlur(value: number) {
+        const next = Math.max(0, value || 0);
+        if (this._shadowBlur === next) {
+            return;
+        }
+        this._shadowBlur = next;
+        this.callLater(this.changeText);
+    }
+
+    get shadowOffsetX(): number {
+        return this._shadowOffsetX;
+    }
+
+    set shadowOffsetX(value: number) {
+        if (this._shadowOffsetX === value) {
+            return;
+        }
+        this._shadowOffsetX = value || 0;
+        this.callLater(this.changeText);
+    }
+
+    get shadowOffsetY(): number {
+        return this._shadowOffsetY;
+    }
+
+    set shadowOffsetY(value: number) {
+        if (this._shadowOffsetY === value) {
+            return;
+        }
+        this._shadowOffsetY = value || 0;
+        this.callLater(this.changeText);
+    }
+
     get bgColor(): string {
         return this._bgColor;
     }
@@ -418,11 +471,23 @@ export class MsdfLabel extends Laya.UIComponent {
     }
 
     protected measureWidth(): number {
-        return (this._textSprite?.contentWidth ?? 0) + this._paddingValues[1] + this._paddingValues[3] + this.getGlowPadding() * 2;
+        const shadowInsets = this.getShadowInsets();
+        return (this._textSprite?.contentWidth ?? 0)
+            + this._paddingValues[1]
+            + this._paddingValues[3]
+            + this.getGlowPadding() * 2
+            + shadowInsets[1]
+            + shadowInsets[3];
     }
 
     protected measureHeight(): number {
-        return (this._textSprite?.contentHeight ?? 0) + this._paddingValues[0] + this._paddingValues[2] + this.getGlowPadding() * 2;
+        const shadowInsets = this.getShadowInsets();
+        return (this._textSprite?.contentHeight ?? 0)
+            + this._paddingValues[0]
+            + this._paddingValues[2]
+            + this.getGlowPadding() * 2
+            + shadowInsets[0]
+            + shadowInsets[2];
     }
 
     protected commitMeasure(): void {
@@ -591,6 +656,20 @@ export class MsdfLabel extends Laya.UIComponent {
         return this._glow > 0 ? Math.ceil(this._glow) : 0;
     }
 
+    private getShadowInsets(): Padding {
+        if (this._shadowBlur <= 0 && this._shadowOffsetX === 0 && this._shadowOffsetY === 0) {
+            return [0, 0, 0, 0];
+        }
+
+        const radius = Math.ceil(this._shadowBlur);
+        return [
+            Math.max(0, Math.ceil(radius - this._shadowOffsetY)),
+            Math.max(0, Math.ceil(radius - this._shadowOffsetX)),
+            Math.max(0, Math.ceil(radius + this._shadowOffsetY)),
+            Math.max(0, Math.ceil(radius + this._shadowOffsetX))
+        ];
+    }
+
     private changeText(): void {
         if (!this._font || !this._textSprite) {
             return;
@@ -598,8 +677,9 @@ export class MsdfLabel extends Laya.UIComponent {
 
         const padding = this._paddingValues;
         const glowPadding = this.getGlowPadding();
+        const shadowInsets = this.getShadowInsets();
         const availableWidth = this._hasExplicitWidth
-            ? Math.max(this.width - padding[1] - padding[3] - glowPadding * 2, 0)
+            ? Math.max(this.width - padding[1] - padding[3] - glowPadding * 2 - shadowInsets[1] - shadowInsets[3], 0)
             : 0;
         const wrapWidth = this._wordWrap && this._hasExplicitWidth ? availableWidth : 0;
 
@@ -609,6 +689,12 @@ export class MsdfLabel extends Laya.UIComponent {
         this._textSprite.lineSpacing = this._leading;
         this._textSprite.defaultAlign = this._align;
         this._textSprite.setGlowStyle(colorToVector4(this._glowColor), this._glow);
+        this._textSprite.setShadowStyle(
+            colorToVector4(this._shadowColor),
+            this._shadowOffsetX,
+            this._shadowOffsetY,
+            this._shadowBlur
+        );
         this._textSprite.setRuns(this.buildTextRuns());
         this._textSprite.refresh();
         this.updateLayoutFrame();
@@ -621,16 +707,17 @@ export class MsdfLabel extends Laya.UIComponent {
 
         const padding = this._paddingValues;
         const glowPadding = this.getGlowPadding();
-        const measuredWidth = this._textSprite.contentWidth + padding[1] + padding[3] + glowPadding * 2;
-        const measuredHeight = this._textSprite.contentHeight + padding[0] + padding[2] + glowPadding * 2;
+        const shadowInsets = this.getShadowInsets();
+        const measuredWidth = this._textSprite.contentWidth + padding[1] + padding[3] + glowPadding * 2 + shadowInsets[1] + shadowInsets[3];
+        const measuredHeight = this._textSprite.contentHeight + padding[0] + padding[2] + glowPadding * 2 + shadowInsets[0] + shadowInsets[2];
         const layoutWidth = this._hasExplicitWidth ? this.width : measuredWidth;
         const layoutHeight = this._hasExplicitHeight ? this.height : measuredHeight;
         const availableHeight = this._hasExplicitHeight
-            ? Math.max(layoutHeight - padding[0] - padding[2] - glowPadding * 2, 0)
+            ? Math.max(layoutHeight - padding[0] - padding[2] - glowPadding * 2 - shadowInsets[0] - shadowInsets[2], 0)
             : this._textSprite.contentHeight;
 
-        const x = padding[3] + glowPadding;
-        let y = padding[0] + glowPadding;
+        const x = padding[3] + glowPadding + shadowInsets[3];
+        let y = padding[0] + glowPadding + shadowInsets[0];
         if (this._valign === "middle") {
             y += Math.max((availableHeight - this._textSprite.contentHeight) * 0.5, 0);
         } else if (this._valign === "bottom") {

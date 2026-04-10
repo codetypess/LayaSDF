@@ -15,9 +15,10 @@ Shader3D Start
         a_attribFlags: Vector4,
         a_msdfFillColor: Vector4,
         a_msdfOutlineColor: Vector4,
-        a_msdfParams: Float,
         a_msdfGlowColor: Vector4,
-        a_msdfGlowParams: Float,
+        a_msdfShadowColor: Vector4,
+        a_msdfPackedParamsA: Vector4,
+        a_msdfPackedParamsB: Vector4,
     },
     defines: {
         TEXTUREVS: { type: bool, default: true }
@@ -40,9 +41,10 @@ GLSL Start
 
     varying vec4 v_msdfFillColor;
     varying vec4 v_msdfOutlineColor;
-    varying float v_msdfParams;
     varying vec4 v_msdfGlowColor;
-    varying float v_msdfGlowParams;
+    varying vec4 v_msdfShadowColor;
+    varying vec4 v_msdfPackedParamsA;
+    varying vec4 v_msdfPackedParamsB;
 
     void main() {
         vertexInfo info;
@@ -54,9 +56,10 @@ GLSL Start
         v_color = info.color;
         v_msdfFillColor = a_msdfFillColor;
         v_msdfOutlineColor = a_msdfOutlineColor;
-        v_msdfParams = a_msdfParams;
         v_msdfGlowColor = a_msdfGlowColor;
-        v_msdfGlowParams = a_msdfGlowParams;
+        v_msdfShadowColor = a_msdfShadowColor;
+        v_msdfPackedParamsA = a_msdfPackedParamsA;
+        v_msdfPackedParamsB = a_msdfPackedParamsB;
 
         vec4 pos;
         getPosition(pos);
@@ -82,9 +85,13 @@ GLSL Start
 
     varying vec4 v_msdfFillColor;
     varying vec4 v_msdfOutlineColor;
-    varying float v_msdfParams;
     varying vec4 v_msdfGlowColor;
-    varying float v_msdfGlowParams;
+    varying vec4 v_msdfShadowColor;
+    varying vec4 v_msdfPackedParamsA;
+    varying vec4 v_msdfPackedParamsB;
+
+    const float PACKED_EFFECT_SIZE_MAX = 32.0;
+    const float SHADOW_OFFSET_INV_SCALE = 0.25;
 
     float median3(float r, float g, float b) {
         return max(min(r, g), min(max(r, g), b));
@@ -106,19 +113,39 @@ GLSL Start
 
         vec4 fillColor = v_msdfFillColor;
         vec4 outlineColor = v_msdfOutlineColor;
-        float outlineWidth = v_msdfParams;
         vec4 glowColor = v_msdfGlowColor;
-        float glowSize = v_msdfGlowParams;
+        vec4 shadowColor = v_msdfShadowColor;
+        float effectFlags = floor(v_msdfPackedParamsB.z + 0.5);
+        bool hasOutline = mod(effectFlags, 2.0) > 0.5;
+        bool hasGlow = mod(floor(effectFlags / 2.0), 2.0) > 0.5;
+        bool hasShadow = mod(floor(effectFlags / 4.0), 2.0) > 0.5;
+        float outlineWidth = hasOutline ? v_msdfPackedParamsA.x * PACKED_EFFECT_SIZE_MAX : 0.0;
+        float glowSize = hasGlow ? v_msdfPackedParamsA.y * PACKED_EFFECT_SIZE_MAX : 0.0;
+        float shadowBlur = hasShadow ? v_msdfPackedParamsA.z * PACKED_EFFECT_SIZE_MAX : 0.0;
+        vec2 shadowOffset = v_msdfPackedParamsB.xy * SHADOW_OFFSET_INV_SCALE;
 
         float fillAlpha = clamp(screenDistance + 0.5, 0.0, 1.0);
         float strokeAlpha = clamp(screenDistance + outlineWidth + 0.5, 0.0, 1.0);
         float outlineAlpha = max(strokeAlpha - fillAlpha, 0.0);
-        float outsideDistance = max(-(screenDistance + outlineWidth), 0.0);
-        float glowAlpha = glowSize > 0.0
-            ? (1.0 - smoothstep(0.0, glowSize, outsideDistance)) * (1.0 - strokeAlpha)
-            : 0.0;
+        float glowAlpha = 0.0;
+        if (glowSize > 0.0 && glowColor.a > 0.0) {
+            float outsideDistance = max(-(screenDistance + outlineWidth), 0.0);
+            glowAlpha = (1.0 - smoothstep(0.0, glowSize, outsideDistance)) * (1.0 - strokeAlpha);
+        }
 
-        vec4 color = glowColor * glowAlpha + outlineColor * outlineAlpha + fillColor * fillAlpha;
+        float shadowAlpha = 0.0;
+        if (shadowColor.a > 0.0 && (shadowBlur > 0.0 || shadowOffset.x != 0.0 || shadowOffset.y != 0.0)) {
+            vec2 shadowTexcoord = texcoord - (dFdx(texcoord) * shadowOffset.x - dFdy(texcoord) * shadowOffset.y);
+            vec3 shadowMsdf = texture2D(u_spriteTexture, shadowTexcoord).rgb;
+            float shadowSd = median3(shadowMsdf.r, shadowMsdf.g, shadowMsdf.b);
+            float shadowScreenDistance = screenPxRange(shadowTexcoord) * (shadowSd - 0.5);
+            shadowAlpha = shadowBlur > 0.0
+                ? smoothstep(-shadowBlur, shadowBlur, shadowScreenDistance)
+                : clamp(shadowScreenDistance + 0.5, 0.0, 1.0);
+            shadowAlpha *= (1.0 - strokeAlpha);
+        }
+
+        vec4 color = shadowColor * shadowAlpha + glowColor * glowAlpha + outlineColor * outlineAlpha + fillColor * fillAlpha;
 
         setglColor(color);
     }

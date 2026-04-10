@@ -17,6 +17,10 @@ export class Main extends Laya.Script {
         title.stroke = 4;
         title.glow = 5;
         title.glowColor = "#e5e830cc";
+        title.shadowColor = "#041520cc";
+        title.shadowBlur = 2;
+        title.shadowOffsetX = 6;
+        title.shadowOffsetY = 6;
         title.pos(80, 30);
         this.owner.addChild(title);
 
@@ -48,9 +52,13 @@ export class Main extends Laya.Script {
         wrapped.fontSize = 28;
         wrapped.color = "#dbe8f2";
         wrapped.strokeColor = "#11212e";
-        wrapped.stroke = 1.2
-        wrapped.glow = 2;
-        wrapped.glowColor = "#ff4000";
+        wrapped.stroke = 1.2;
+        // wrapped.glow = 2;
+        // wrapped.glowColor = "#ff4000";
+        wrapped.shadowColor = "#020617cc";
+        wrapped.shadowBlur = 0;
+        wrapped.shadowOffsetX = 2;
+        wrapped.shadowOffsetY = 2;
         wrapped.bgColor = "#1a2736";
         wrapped.borderColor = "#3b546d";
         wrapped.wordWrap = true;

@@ -13576,15 +13576,16 @@ window.Laya = (function (exports) {
 
     class MeshTextureMSDF extends Sprite2DGeometry {
         static __init__() {
-            MeshTextureMSDF.VertexDeclarition = new VertexDeclaration(44, [
+            MeshTextureMSDF.VertexDeclarition = new VertexDeclaration(48, [
                 new VertexElement(0, VertexElementFormat.Vector4, 0),
                 new VertexElement(16, VertexElementFormat.NorUByte4, 1),
                 new VertexElement(20, VertexElementFormat.Byte4, 2),
                 new VertexElement(24, VertexElementFormat.NorUByte4, 3),
                 new VertexElement(28, VertexElementFormat.NorUByte4, 4),
-                new VertexElement(32, VertexElementFormat.Single, 5),
+                new VertexElement(32, VertexElementFormat.NorUByte4, 5),
                 new VertexElement(36, VertexElementFormat.NorUByte4, 6),
-                new VertexElement(40, VertexElementFormat.Single, 7),
+                new VertexElement(40, VertexElementFormat.NorUByte4, 7),
+                new VertexElement(44, VertexElementFormat.Byte4, 8),
             ]);
         }
         constructor() {
@@ -13597,7 +13598,7 @@ window.Laya = (function (exports) {
         onIBRealloc(buff) {
             this._ibU16Array = new Uint16Array(buff);
         }
-        addData(vertices, uvs, idx, matrix, abgr, fillColors, outlineColors, outlineParams, glowColors, glowParams, uvrect = null) {
+        addData(vertices, uvs, idx, matrix, abgr, fillColors, outlineColors, glowColors, shadowColors, packedParamsA, packedParamsB, uvrect = null) {
             const addVert = vertices.length / 2;
             this.expVBSize(addVert * MeshTextureMSDF.const_stride);
             const vertsz = vertices.length >> 1;
@@ -13638,11 +13639,12 @@ window.Laya = (function (exports) {
                 vbUIntData[u32pos + 5] = MeshTextureMSDF.USE_TEX_FLAG;
                 vbUIntData[u32pos + 6] = fillColors[i];
                 vbUIntData[u32pos + 7] = outlineColors[i];
-                vbFloatData[f32pos + 8] = outlineParams[i];
-                vbUIntData[u32pos + 9] = glowColors[i];
-                vbFloatData[f32pos + 10] = glowParams[i];
-                f32pos += 11;
-                u32pos += 11;
+                vbUIntData[u32pos + 8] = glowColors[i];
+                vbUIntData[u32pos + 9] = shadowColors[i];
+                vbUIntData[u32pos + 10] = packedParamsA[i];
+                vbUIntData[u32pos + 11] = packedParamsB[i];
+                f32pos += 12;
+                u32pos += 12;
                 ci += 2;
             }
             const vertN = this._vertNum;
@@ -13664,7 +13666,7 @@ window.Laya = (function (exports) {
             return MeshTextureMSDF.VertexDeclarition;
         }
     }
-    MeshTextureMSDF.const_stride = 44;
+    MeshTextureMSDF.const_stride = 48;
     MeshTextureMSDF.VertexDeclarition = null;
     MeshTextureMSDF.USE_TEX_FLAG = 1;
 
@@ -14631,11 +14633,6 @@ window.Laya = (function (exports) {
             this.drawTriangles(tex, x, y, vertices, uvs, indices, matrix, alpha, blendMode, colorNum);
             this._drawTriUseAbsMatrix = false;
         }
-        drawTrianglesAbsMSDF(tex, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, glowColors, glowParams, matrix, alpha, blendMode, colorNum = 0xffffffff) {
-            this._drawTriUseAbsMatrix = true;
-            this.drawTrianglesMSDF(tex, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, glowColors, glowParams, matrix, alpha, blendMode, colorNum);
-            this._drawTriUseAbsMatrix = false;
-        }
         drawTriangles(tex, x, y, vertices, uvs, indices, matrix, alpha, blendMode, colorNum = 0xffffffff) {
             if (alpha == null)
                 alpha = 1.0;
@@ -14700,7 +14697,7 @@ window.Laya = (function (exports) {
                 this.globalCompositeOperation = oldcomp;
             }
         }
-        drawTrianglesMSDF(tex, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, glowColors, glowParams, matrix, alpha, blendMode, colorNum = 0xffffffff) {
+        drawTrianglesMSDF(tex, x, y, vertices, uvs, indices, fillColors, outlineColors, glowColors, shadowColors, packedParamsA, packedParamsB, matrix, alpha, blendMode, colorNum = 0xffffffff) {
             if (alpha == null)
                 alpha = 1.0;
             if (!tex._getSource()) {
@@ -14754,10 +14751,10 @@ window.Laya = (function (exports) {
                     tmpMat$1.ty = matrix.ty + y;
                 }
                 Matrix.mul(tmpMat$1, this._curMat, tmpMat$1);
-                this._mesh.addData(vertices, uvs, indices, tmpMat$1 || this._curMat, rgba, fillColors, outlineColors, outlineParams, glowColors, glowParams);
+                this._mesh.addData(vertices, uvs, indices, tmpMat$1 || this._curMat, rgba, fillColors, outlineColors, glowColors, shadowColors, packedParamsA, packedParamsB);
             }
             else {
-                this._mesh.addData(vertices, uvs, indices, matrix, rgba, fillColors, outlineColors, outlineParams, glowColors, glowParams);
+                this._mesh.addData(vertices, uvs, indices, matrix, rgba, fillColors, outlineColors, glowColors, shadowColors, packedParamsA, packedParamsB);
             }
             this._curSubmit._numEle += indices.length;
             if (blendMode) {
@@ -17407,10 +17404,7 @@ window.Laya = (function (exports) {
     ClassUtils.regClass("DrawTrianglesCmd", DrawTrianglesCmd);
 
     class DrawTrianglesMSDFCmd {
-        constructor() {
-            this.drawTriUseAbsMatrix = false;
-        }
-        static create(texture, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, glowColors, glowParams, matrix, alpha, color, blendMode) {
+        static create(texture, x, y, vertices, uvs, indices, fillColors, outlineColors, glowColors, shadowColors, packedParamsA, packedParamsB, matrix, alpha, color, blendMode) {
             const cmd = Pool.getItemByClass("DrawTrianglesMSDFCmd", DrawTrianglesMSDFCmd);
             cmd.texture = texture;
             texture._addReference();
@@ -17421,9 +17415,10 @@ window.Laya = (function (exports) {
             cmd.indices = indices;
             cmd.fillColors = fillColors;
             cmd.outlineColors = outlineColors;
-            cmd.outlineParams = outlineParams;
             cmd.glowColors = glowColors;
-            cmd.glowParams = glowParams;
+            cmd.shadowColors = shadowColors;
+            cmd.packedParamsA = packedParamsA;
+            cmd.packedParamsB = packedParamsB;
             cmd.matrix = matrix;
             cmd.alpha = alpha;
             cmd.color = color == null ? 0xffffffff : typeof (color) == "string" ? ColorUtils.create(color).numColor : color;
@@ -17438,19 +17433,15 @@ window.Laya = (function (exports) {
             this.indices = null;
             this.fillColors = null;
             this.outlineColors = null;
-            this.outlineParams = null;
             this.glowColors = null;
-            this.glowParams = null;
+            this.shadowColors = null;
+            this.packedParamsA = null;
+            this.packedParamsB = null;
             this.matrix = null;
             Pool.recover("DrawTrianglesMSDFCmd", this);
         }
         run(context, gx, gy) {
-            if (this.drawTriUseAbsMatrix && this.matrix) {
-                context.drawTrianglesAbsMSDF(this.texture, this.x + gx, this.y + gy, this.vertices, this.uvs, this.indices, this.fillColors, this.outlineColors, this.outlineParams, this.glowColors, this.glowParams, this.matrix, this.alpha, this.blendMode, this.color);
-            }
-            else {
-                context.drawTrianglesMSDF(this.texture, this.x + gx, this.y + gy, this.vertices, this.uvs, this.indices, this.fillColors, this.outlineColors, this.outlineParams, this.glowColors, this.glowParams, this.matrix, this.alpha, this.blendMode, this.color);
-            }
+            context.drawTrianglesMSDF(this.texture, this.x + gx, this.y + gy, this.vertices, this.uvs, this.indices, this.fillColors, this.outlineColors, this.glowColors, this.shadowColors, this.packedParamsA, this.packedParamsB, this.matrix, this.alpha, this.blendMode, this.color);
         }
         get cmdID() {
             return DrawTrianglesMSDFCmd.ID;
@@ -18390,13 +18381,8 @@ window.Laya = (function (exports) {
             cmd.drawTriUseAbsMatrix = true;
             return this.addCmd(cmd);
         }
-        drawTrianglesMSDF(texture, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, glowColors, glowParams, matrix = null, alpha = 1, color = null, blendMode = null) {
-            return this.addCmd(DrawTrianglesMSDFCmd.create(texture, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, glowColors, glowParams, matrix, alpha, color, blendMode));
-        }
-        drawTrianglesAbsMSDF(texture, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, glowColors, glowParams, matrix, alpha = 1, color = null, blendMode = null) {
-            const cmd = DrawTrianglesMSDFCmd.create(texture, x, y, vertices, uvs, indices, fillColors, outlineColors, outlineParams, glowColors, glowParams, matrix, alpha, color, blendMode);
-            cmd.drawTriUseAbsMatrix = true;
-            return this.addCmd(cmd);
+        drawTrianglesMSDF(texture, x, y, vertices, uvs, indices, fillColors, outlineColors, glowColors, shadowColors, packedParamsA, packedParamsB, matrix = null, alpha = 1, color = null, blendMode = null) {
+            return this.addCmd(DrawTrianglesMSDFCmd.create(texture, x, y, vertices, uvs, indices, fillColors, outlineColors, glowColors, shadowColors, packedParamsA, packedParamsB, matrix, alpha, color, blendMode));
         }
         fillTexture(texture, x, y, width = 0, height = 0, type = "repeat", offset = null, color = null, percent = false) {
             if (texture && texture.bitmap)
@@ -36425,6 +36411,14 @@ ${uniformglsl}`;
     }
     BaseRenderNode2D._uniqueIDCounter = 0;
 
+    class System {
+        static changeDefinition(name, classObj) {
+            window.Laya[name] = classObj;
+            var str = name + "=classObj";
+            window['eval'](str);
+        }
+    }
+
     class VertexMesh2D {
         static getVertexDeclaration(vertexFlags, compatible = true) {
             let verDecs = [];
@@ -36633,14 +36627,6 @@ ${uniformglsl}`;
         }
     }
     WebGLRTMgr.dict = {};
-
-    class System {
-        static changeDefinition(name, classObj) {
-            window.Laya[name] = classObj;
-            var str = name + "=classObj";
-            window['eval'](str);
-        }
-    }
 
     class PerfTools {
         static begin(block) {
