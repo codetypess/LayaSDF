@@ -39,17 +39,21 @@ export class Main extends Laya.Script {
                     label.font = "demo-msdf";
                     label.fontSize = 34;
                     label.stroke = 2;
+                    label.wordWrap = true;
                     label.strokeColor = "#1d9c7c";
                     label.shadowColor = "#03111fcc";
-                    label.shadowOffsetX = 4;
-                    label.shadowOffsetY = 4;
+                    label.shadowOffsetX = 3;
+                    label.shadowOffsetY = 3;
+                    label.width = 480;
                     return label;
                 },
                 buildNative: () => {
                     const label = this.createNativeLabel("Laya.Label 使用 TTF 作为基准参照。");
                     label.font = NATIVE_FONT_URL;
+                    label.wordWrap = true;
                     label.fontSize = 34;
                     label.stroke = 2;
+                    label.width = 480;
                     label.strokeColor = "#1d9c7c";
                     return label;
                 }
@@ -193,6 +197,34 @@ export class Main extends Laya.Script {
                 }
             },
             {
+                title: "overflow shrink",
+                note: "固定宽高后整体缩小文本，以适应内容区域。",
+                buildMsdf: () => {
+                    const label = this.createMsdfLabel("overflow=shrink 时，文本应整体缩小并保持完整显示。overflow=shrink 时，文本应整体缩小并保持完整显示。");
+                    label.font = "demo-msdf";
+                    label.fontSize = 30;
+                    label.wordWrap = true;
+                    label.overflow = "shrink";
+                    label.size(296, 84);
+                    label.padding = "10,12,10,12";
+                    label.bgColor = "#16263a";
+                    label.borderColor = "#d33408";
+                    return label;
+                },
+                buildNative: () => {
+                    const label = this.createNativeLabel("overflow=shrink 时，文本应整体缩小并保持完整显示。");
+                    label.font = NATIVE_FONT_URL;
+                    label.fontSize = 30;
+                    label.wordWrap = true;
+                    label.overflow = "shrink";
+                    label.size(296, 84);
+                    label.padding = "10,12,10,12";
+                    label.bgColor = "#16263a";
+                    label.borderColor = "#35506d";
+                    return label;
+                }
+            },
+            {
                 title: "template + escape",
                 note: "验证 templateVars、setVar 和 \\n 转义字符解析。",
                 buildMsdf: () => {
@@ -233,11 +265,7 @@ export class Main extends Laya.Script {
                     label.padding = "10,12,10,12";
                     label.bgColor = "#16263a";
                     label.borderColor = "#35506d";
-                    label.once(Laya.Event.LOADED, label, () => {
-                        if (label.textField) {
-                            label.textField.scrollY = 34;
-                        }
-                    });
+                    label.textField.scrollY = 34;
                     return label;
                 },
                 buildNative: () => {
@@ -370,9 +398,6 @@ export class Main extends Laya.Script {
         const label = new MsdfLabel(text);
         label.color = "#d9e7f5";
         label.leading = 6;
-        label.shadowColor = "#020817cc";
-        label.shadowOffsetX = 2;
-        label.shadowOffsetY = 2;
         return label;
     }
 
