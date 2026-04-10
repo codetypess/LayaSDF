@@ -7071,13 +7071,6 @@
     }
     XML2ObjectNodejs.ChildrenSign = "childNodes";
 
-    class DInput extends Laya.Input {
-        constructor() {
-            super();
-            this.bgColor = "#11ff00";
-        }
-    }
-
     class Arrow extends Laya.Sprite {
         constructor() {
             super();
@@ -7126,32 +7119,6 @@
         }
         getDy() {
             return this.y - this.preY;
-        }
-    }
-
-    class Observer {
-        constructor() {
-        }
-        static observe(obj, callBack) {
-        }
-        static unobserve(obj, callBack) {
-        }
-        static observeDiffer(obj, sign, msg = "obDiffer") {
-            var differFun = function () {
-                DifferTool.differ(sign, obj, msg);
-            };
-            Observer.observe(obj, differFun);
-        }
-    }
-
-    class Watch {
-        constructor() {
-        }
-        static watch(obj, name, callBack) {
-            obj.watch(name, callBack);
-        }
-        static unwatch(obj, name, callBack) {
-            obj.unwatch(name, callBack);
         }
     }
 
@@ -7239,6 +7206,39 @@
     FunctionTimeHook.counter = new CountTool();
     FunctionTimeHook.funPre = {};
     FunctionTimeHook.TotalSign = "TotalSign";
+
+    class DInput extends Laya.Input {
+        constructor() {
+            super();
+            this.bgColor = "#11ff00";
+        }
+    }
+
+    class Observer {
+        constructor() {
+        }
+        static observe(obj, callBack) {
+        }
+        static unobserve(obj, callBack) {
+        }
+        static observeDiffer(obj, sign, msg = "obDiffer") {
+            var differFun = function () {
+                DifferTool.differ(sign, obj, msg);
+            };
+            Observer.observe(obj, differFun);
+        }
+    }
+
+    class Watch {
+        constructor() {
+        }
+        static watch(obj, name, callBack) {
+            obj.watch(name, callBack);
+        }
+        static unwatch(obj, name, callBack) {
+            obj.unwatch(name, callBack);
+        }
+    }
 
     class Layouter {
         constructor() {

@@ -12348,6 +12348,79 @@ window.Laya = (function (exports) {
         }
     }
 
+    class MsdfSubmitCache {
+        constructor() {
+            this._data = [];
+            this._enable = false;
+        }
+        clear() {
+            this._data.length = 0;
+            this._enable = false;
+        }
+        destroy() {
+            this.clear();
+            this._data = null;
+        }
+        add(item) {
+            this._data.push(item);
+        }
+        enable(value, ctx) {
+            if (value === this._enable)
+                return;
+            this._enable = value;
+            this._enable || this.submit(ctx);
+        }
+        submit(ctx) {
+            const data = this._data;
+            const count = data.length;
+            if (!count)
+                return;
+            ctx.drawLeftData();
+            const mesh = ctx._mesh = ctx._meshTexMSDF;
+            for (let i = 0; i < count; i++) {
+                const item = data[i];
+                const preKey = ctx._curSubmit._key;
+                const sameKey = preKey.submitType === SubmitBase.KEY_TRIANGLES_MSDF &&
+                    preKey.other === item.imgId &&
+                    preKey.blendShader === item.blendShader &&
+                    ctx._mesh.vertexNum + item.vertices.length / 2 < 65535 &&
+                    ctx._curSubmit.material === item.material &&
+                    ctx._curSubmit._colorFiler === item.colorFilter &&
+                    ctx._curSubmit.clipInfoID === item.clipInfoID;
+                if (!sameKey) {
+                    ctx.drawLeftData();
+                    ctx._mesh = mesh;
+                    const submit = ctx._curSubmit = SubmitBase.create(ctx, mesh, Value2D.create(exports.RenderSpriteData.Texture2D));
+                    submit.shaderValue.textureHost = item.tex;
+                    ctx.fillShaderValue(submit.shaderValue);
+                    submit._key.submitType = SubmitBase.KEY_TRIANGLES_MSDF;
+                    submit._key.other = item.imgId;
+                    submit._key.blendShader = item.blendShader;
+                    submit._colorFiler = item.colorFilter;
+                    submit.material = item.material;
+                    const clipInfo = item.clipMatrix;
+                    const cm = submit.shaderValue.clipMatDir;
+                    cm.x = clipInfo.a;
+                    cm.y = clipInfo.b;
+                    cm.z = clipInfo.c;
+                    cm.w = clipInfo.d;
+                    submit.shaderValue.clipMatDir = cm;
+                    const cmp = submit.shaderValue.clipMatPos;
+                    cmp.x = clipInfo.tx;
+                    cmp.y = clipInfo.ty;
+                    submit.shaderValue.clipMatPos = cmp;
+                    submit.clipInfoID = item.clipInfoID;
+                }
+                mesh.addData(item.vertices, item.uvs, item.indices, Matrix.EMPTY, item.color, item.fillColors, item.outlineColors, item.glowColors, item.shadowColors, item.packedParamsA, item.packedParamsB);
+                ctx._curSubmit._numEle += item.indices.length;
+            }
+            this._data.length = 0;
+            if (RenderInfo.loopCount % 100 == 0)
+                data.length = 0;
+            ctx.drawLeftData();
+        }
+    }
+
     class AtlasGrid {
         constructor(width = 0, height = 0, id = 0) {
             this.atlasID = 0;
@@ -13768,6 +13841,7 @@ window.Laya = (function (exports) {
             this._nBlendType = 0;
             this._save = null;
             this._charSubmitCache = null;
+            this._msdfSubmitCache = null;
             this._saveMark = null;
             this._shader2D = new Shader2D();
             this.sprite = null;
@@ -13796,6 +13870,7 @@ window.Laya = (function (exports) {
             this._other = ContextParams.DEFAULT;
             this._curMat = Matrix.create();
             this._charSubmitCache = new CharSubmitCache(this);
+            this._msdfSubmitCache = new MsdfSubmitCache();
             this._mesh = this._meshQuatTex;
             this._mesh.clearMesh();
             this._save = [SaveMark.Create(this)];
@@ -14015,6 +14090,7 @@ window.Laya = (function (exports) {
             this._shader2D.destroy();
             this._shader2D = null;
             this._charSubmitCache.clear();
+            this._msdfSubmitCache.clear();
             this._path = null;
             this._save = null;
             this.sprite = null;
@@ -14024,6 +14100,7 @@ window.Laya = (function (exports) {
             this.clear();
             this.sprite = null;
             this._charSubmitCache && this._charSubmitCache.destroy();
+            this._msdfSubmitCache && this._msdfSubmitCache.destroy();
             if (this.defTexture) {
                 this.defTexture.bitmap && this.defTexture.bitmap.destroy();
                 this.defTexture.destroy();
@@ -14375,7 +14452,45 @@ window.Laya = (function (exports) {
         }
         drawCallOptimize(enable) {
             this._charSubmitCache.enable(enable, this);
+            this._msdfSubmitCache.enable(enable, this);
             return enable;
+        }
+        _transformMSDFVertices(vertices, x, y, matrix) {
+            const worldVertices = new Float32Array(vertices.length);
+            let transform = matrix;
+            if (!this._drawTriUseAbsMatrix) {
+                if (!matrix) {
+                    tmpMat$1.a = 1;
+                    tmpMat$1.b = 0;
+                    tmpMat$1.c = 0;
+                    tmpMat$1.d = 1;
+                    tmpMat$1.tx = x;
+                    tmpMat$1.ty = y;
+                }
+                else {
+                    tmpMat$1.a = matrix.a;
+                    tmpMat$1.b = matrix.b;
+                    tmpMat$1.c = matrix.c;
+                    tmpMat$1.d = matrix.d;
+                    tmpMat$1.tx = matrix.tx + x;
+                    tmpMat$1.ty = matrix.ty + y;
+                }
+                Matrix.mul(tmpMat$1, this._curMat, tmpMat$1);
+                transform = tmpMat$1;
+            }
+            const m00 = transform.a;
+            const m01 = transform.b;
+            const m10 = transform.c;
+            const m11 = transform.d;
+            const tx = transform.tx;
+            const ty = transform.ty;
+            for (let i = 0; i < vertices.length; i += 2) {
+                const vx = vertices[i];
+                const vy = vertices[i + 1];
+                worldVertices[i] = vx * m00 + vy * m10 + tx;
+                worldVertices[i + 1] = vx * m01 + vy * m11 + ty;
+            }
+            return worldVertices;
         }
         _drawToRender2D(submit) {
             let mesh = this._mesh;
@@ -14733,6 +14848,31 @@ window.Laya = (function (exports) {
             }
             const nAlpha = this._alpha * alpha;
             const rgba = Array.isArray(colorNum) ? colorNum.map(v => this._mixRGBandAlpha(v, nAlpha)) : this._mixRGBandAlpha(colorNum, nAlpha);
+            if (this._msdfSubmitCache ? this._msdfSubmitCache._enable : false) {
+                this._msdfSubmitCache.add({
+                    tex,
+                    imgId: webGLImg.id,
+                    clipInfoID: this._clipInfoID,
+                    clipMatrix: this._globalClipMatrix.clone(),
+                    colorFilter: this._colorFiler,
+                    material: this._material,
+                    blendShader: this._nBlendType,
+                    vertices: this._transformMSDFVertices(vertices, x, y, matrix),
+                    uvs,
+                    indices,
+                    fillColors,
+                    outlineColors,
+                    glowColors,
+                    shadowColors,
+                    packedParamsA,
+                    packedParamsB,
+                    color: rgba
+                });
+                if (blendMode) {
+                    this.globalCompositeOperation = oldcomp;
+                }
+                return;
+            }
             if (!this._drawTriUseAbsMatrix) {
                 if (!matrix) {
                     tmpMat$1.a = 1;
@@ -36411,14 +36551,6 @@ ${uniformglsl}`;
     }
     BaseRenderNode2D._uniqueIDCounter = 0;
 
-    class System {
-        static changeDefinition(name, classObj) {
-            window.Laya[name] = classObj;
-            var str = name + "=classObj";
-            window['eval'](str);
-        }
-    }
-
     class VertexMesh2D {
         static getVertexDeclaration(vertexFlags, compatible = true) {
             let verDecs = [];
@@ -36627,6 +36759,14 @@ ${uniformglsl}`;
         }
     }
     WebGLRTMgr.dict = {};
+
+    class System {
+        static changeDefinition(name, classObj) {
+            window.Laya[name] = classObj;
+            var str = name + "=classObj";
+            window['eval'](str);
+        }
+    }
 
     class PerfTools {
         static begin(block) {
@@ -39584,6 +39724,7 @@ ${uniformglsl}`;
     exports.MeshTextureMSDF = MeshTextureMSDF;
     exports.MeshVG = MeshVG;
     exports.Mouse = Mouse;
+    exports.MsdfSubmitCache = MsdfSubmitCache;
     exports.Node = Node;
     exports.NodeFlags = NodeFlags;
     exports.NotImplementedError = NotImplementedError;

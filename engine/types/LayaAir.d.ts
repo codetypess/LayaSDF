@@ -73437,6 +73437,8 @@ declare module Laya {
         /**@internal */
         _charSubmitCache: CharSubmitCache | null;
         /**@internal */
+        _msdfSubmitCache: MsdfSubmitCache | null;
+        /**@internal */
         _saveMark: SaveMark | null;
         /**@internal */
         private _shader2D;
@@ -73591,6 +73593,7 @@ declare module Laya {
         _copyClipInfoToShaderData(shaderData: ShaderData): void;
         private isStopMerge;
         drawCallOptimize(enable: boolean): boolean;
+        private _transformMSDFVertices;
         private _drawToRender2D;
         private _drawMesh;
         /**
@@ -90452,6 +90455,35 @@ declare module Laya {
          * @param   onlyH 不检查左右
          */
         private updateBbx;
+    }
+    type MsdfSubmitCacheItem = {
+        tex: Texture;
+        imgId: number;
+        clipInfoID: number;
+        clipMatrix: Matrix;
+        colorFilter: ColorFilter | null;
+        material: Material | null;
+        blendShader: number;
+        vertices: Float32Array;
+        uvs: Float32Array;
+        indices: Uint16Array;
+        fillColors: Uint32Array;
+        outlineColors: Uint32Array;
+        glowColors: Uint32Array;
+        shadowColors: Uint32Array;
+        packedParamsA: Uint32Array;
+        packedParamsB: Uint32Array;
+        color: number | number[];
+    };
+    class MsdfSubmitCache {
+        private _data;
+        /**@internal */
+        _enable: boolean;
+        clear(): void;
+        destroy(): void;
+        add(item: MsdfSubmitCacheItem): void;
+        enable(value: boolean, ctx: Context): void;
+        submit(ctx: Context): void;
     }
     /**
      *  文字贴图的大图集。

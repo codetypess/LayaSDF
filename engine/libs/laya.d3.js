@@ -28276,13 +28276,6 @@
     }
     Laya.Loader.registerLoader(["tex2darray"], Texture2DArrayLoader, Laya.Loader.TEXTURE2DARRAY);
 
-    exports.ShadowLightType = void 0;
-    (function (ShadowLightType) {
-        ShadowLightType[ShadowLightType["DirectionLight"] = 0] = "DirectionLight";
-        ShadowLightType[ShadowLightType["SpotLight"] = 1] = "SpotLight";
-        ShadowLightType[ShadowLightType["PointLight"] = 2] = "PointLight";
-    })(exports.ShadowLightType || (exports.ShadowLightType = {}));
-
     class BoundSphere {
         get center() {
             return this._center;
@@ -28355,6 +28348,250 @@
         }
     }
     const _tempVector3 = new Laya.Vector3();
+
+    class BoundsImpl {
+        get min() {
+            return this.getMin();
+        }
+        set min(value) {
+            this.setMin(value);
+        }
+        get max() {
+            return this.getMax();
+        }
+        set max(value) {
+            this.setMax(value);
+        }
+        setMin(value) {
+            var min = this._boundBox.min;
+            if (value !== min)
+                value.cloneTo(min);
+            this._setUpdateFlag(BoundsImpl._UPDATE_CENTER | BoundsImpl._UPDATE_EXTENT, true);
+            this._setUpdateFlag(BoundsImpl._UPDATE_MIN, false);
+        }
+        getMin() {
+            var min = this._boundBox.min;
+            if (this._getUpdateFlag(BoundsImpl._UPDATE_MIN)) {
+                this._getMin(this.getCenter(), this.getExtent(), min);
+                this._setUpdateFlag(BoundsImpl._UPDATE_MIN, false);
+            }
+            return min;
+        }
+        setMax(value) {
+            var max = this._boundBox.max;
+            if (value !== max)
+                value.cloneTo(max);
+            this._setUpdateFlag(BoundsImpl._UPDATE_CENTER | BoundsImpl._UPDATE_EXTENT, true);
+            this._setUpdateFlag(BoundsImpl._UPDATE_MAX, false);
+        }
+        getMax() {
+            var max = this._boundBox.max;
+            if (this._getUpdateFlag(BoundsImpl._UPDATE_MAX)) {
+                this._getMax(this.getCenter(), this.getExtent(), max);
+                this._setUpdateFlag(BoundsImpl._UPDATE_MAX, false);
+            }
+            return max;
+        }
+        setCenter(value) {
+            if (value !== this._center)
+                value.cloneTo(this._center);
+            this._getMin(this._center, this._extent, this._boundBox.min);
+            this._getMax(this._center, this._extent, this._boundBox.max);
+            this._setUpdateFlag(BoundsImpl._UPDATE_CENTER | BoundsImpl._UPDATE_MIN | BoundsImpl._UPDATE_MAX, false);
+        }
+        getCenter() {
+            if (this._getUpdateFlag(BoundsImpl._UPDATE_CENTER)) {
+                this._getCenter(this.getMin(), this.getMax(), this._center);
+                this._setUpdateFlag(BoundsImpl._UPDATE_CENTER, false);
+            }
+            return this._center;
+        }
+        setExtent(value) {
+            if (value !== this._extent)
+                value.cloneTo(this._extent);
+            this._getMin(this._center, this._extent, this._boundBox.min);
+            this._getMax(this._center, this._extent, this._boundBox.max);
+            this._setUpdateFlag(BoundsImpl._UPDATE_CENTER | BoundsImpl._UPDATE_MIN | BoundsImpl._UPDATE_MAX, false);
+        }
+        getExtent() {
+            if (this._getUpdateFlag(BoundsImpl._UPDATE_EXTENT)) {
+                this._getExtent(this.getMin(), this.getMax(), this._extent);
+                this._setUpdateFlag(BoundsImpl._UPDATE_EXTENT, false);
+            }
+            return this._extent;
+        }
+        constructor(min, max) {
+            this._updateFlag = 0;
+            this._center = new Laya.Vector3();
+            this._extent = new Laya.Vector3();
+            this._boundBox = new BoundBox(new Laya.Vector3(), new Laya.Vector3());
+            min && min.cloneTo(this._boundBox.min);
+            max && max.cloneTo(this._boundBox.max);
+            this._setUpdateFlag(BoundsImpl._UPDATE_MIN | BoundsImpl._UPDATE_MAX, false);
+            this._setUpdateFlag(BoundsImpl._UPDATE_CENTER | BoundsImpl._UPDATE_EXTENT, true);
+        }
+        _getUpdateFlag(type) {
+            return (this._updateFlag & type) != 0;
+        }
+        _setUpdateFlag(type, value) {
+            if (value)
+                this._updateFlag |= type;
+            else
+                this._updateFlag &= ~type;
+        }
+        _getCenter(min, max, out) {
+            Laya.Vector3.add(min, max, out);
+            Laya.Vector3.scale(out, 0.5, out);
+        }
+        _getExtent(min, max, out) {
+            Laya.Vector3.subtract(max, min, out);
+            Laya.Vector3.scale(out, 0.5, out);
+        }
+        _getMin(center, extent, out) {
+            Laya.Vector3.subtract(center, extent, out);
+        }
+        _getMax(center, extent, out) {
+            Laya.Vector3.add(center, extent, out);
+        }
+        _rotateExtents(extents, rotation, out) {
+            var extentsX = extents.x;
+            var extentsY = extents.y;
+            var extentsZ = extents.z;
+            var matE = rotation.elements;
+            out.x = Math.abs(matE[0] * extentsX) + Math.abs(matE[4] * extentsY) + Math.abs(matE[8] * extentsZ);
+            out.y = Math.abs(matE[1] * extentsX) + Math.abs(matE[5] * extentsY) + Math.abs(matE[9] * extentsZ);
+            out.z = Math.abs(matE[2] * extentsX) + Math.abs(matE[6] * extentsY) + Math.abs(matE[10] * extentsZ);
+        }
+        _tranform(matrix, out) {
+            var outCen = out._center;
+            var outExt = out._extent;
+            Laya.Vector3.transformCoordinate(this.getCenter(), matrix, outCen);
+            this._rotateExtents(this.getExtent(), matrix, outExt);
+            out._boundBox.setCenterAndExtent(outCen, outExt);
+            out._updateFlag = 0;
+        }
+        _getBoundBox() {
+            if (this._updateFlag & BoundsImpl._UPDATE_MIN) {
+                var min = this._boundBox.min;
+                this._getMin(this.getCenter(), this.getExtent(), min);
+                this._setUpdateFlag(BoundsImpl._UPDATE_MIN, false);
+            }
+            if (this._updateFlag & BoundsImpl._UPDATE_MAX) {
+                var max = this._boundBox.max;
+                this._getMax(this.getCenter(), this.getExtent(), max);
+                this._setUpdateFlag(BoundsImpl._UPDATE_MAX, false);
+            }
+            return this._boundBox;
+        }
+        calculateBoundsintersection(bounds) {
+            var ownMax = this.getMax();
+            var ownMin = this.getMin();
+            var calMax = bounds.getMax();
+            var calMin = bounds.getMin();
+            var tempV0 = TEMP_VECTOR3_MAX0;
+            var tempV1 = TEMP_VECTOR3_MAX1;
+            var thisExtends = this.getExtent();
+            var boundExtends = bounds.getExtent();
+            tempV0.setValue(Math.max(ownMax.x, calMax.x) - Math.min(ownMin.x, calMin.x), Math.max(ownMax.y, calMax.y) - Math.min(ownMin.y, calMin.y), Math.max(ownMax.z, calMax.z) - Math.min(ownMin.z, calMin.z));
+            tempV1.setValue((thisExtends.x + boundExtends.x) * 2.0, (thisExtends.y + boundExtends.y) * 2.0, (thisExtends.z + boundExtends.z) * 2.0);
+            if ((tempV0.x) > (tempV1.x))
+                return -1;
+            if ((tempV0.y) > (tempV1.y))
+                return -1;
+            if ((tempV0.z) > (tempV1.z))
+                return -1;
+            return (tempV1.x - tempV0.x) * (tempV1.y - tempV0.y) * (tempV1.z - tempV0.z);
+        }
+        cloneTo(destObject) {
+            this.getMin().cloneTo(destObject._boundBox.min);
+            this.getMax().cloneTo(destObject._boundBox.max);
+            this.getCenter().cloneTo(destObject._center);
+            this.getExtent().cloneTo(destObject._extent);
+            destObject._updateFlag = 0;
+        }
+        clone() {
+            var dest = new BoundsImpl(new Laya.Vector3(), new Laya.Vector3());
+            this.cloneTo(dest);
+            return dest;
+        }
+    }
+    BoundsImpl._UPDATE_MIN = 0x01;
+    BoundsImpl._UPDATE_MAX = 0x02;
+    BoundsImpl._UPDATE_CENTER = 0x04;
+    BoundsImpl._UPDATE_EXTENT = 0x08;
+    const TEMP_VECTOR3_MAX0 = new Laya.Vector3();
+    const TEMP_VECTOR3_MAX1 = new Laya.Vector3();
+
+    class RandX {
+        constructor(seed) {
+            if (!(seed instanceof Array) || seed.length !== 4)
+                throw new Error('Rand:Seed must be an array with 4 numbers');
+            this._state0U = seed[0] | 0;
+            this._state0L = seed[1] | 0;
+            this._state1U = seed[2] | 0;
+            this._state1L = seed[3] | 0;
+        }
+        randomint() {
+            var s1U = this._state0U, s1L = this._state0L;
+            var s0U = this._state1U, s0L = this._state1L;
+            var sumL = (s0L >>> 0) + (s1L >>> 0);
+            var resU = (s0U + s1U + (sumL / 2 >>> 31)) >>> 0;
+            var resL = sumL >>> 0;
+            this._state0U = s0U;
+            this._state0L = s0L;
+            var t1U = 0, t1L = 0;
+            var t2U = 0, t2L = 0;
+            var a1 = 23;
+            var m1 = 0xFFFFFFFF << (32 - a1);
+            t1U = (s1U << a1) | ((s1L & m1) >>> (32 - a1));
+            t1L = s1L << a1;
+            s1U = s1U ^ t1U;
+            s1L = s1L ^ t1L;
+            t1U = s1U ^ s0U;
+            t1L = s1L ^ s0L;
+            var a2 = 18;
+            var m2 = 0xFFFFFFFF >>> (32 - a2);
+            t2U = s1U >>> a2;
+            t2L = (s1L >>> a2) | ((s1U & m2) << (32 - a2));
+            t1U = t1U ^ t2U;
+            t1L = t1L ^ t2L;
+            var a3 = 5;
+            var m3 = 0xFFFFFFFF >>> (32 - a3);
+            t2U = s0U >>> a3;
+            t2L = (s0L >>> a3) | ((s0U & m3) << (32 - a3));
+            t1U = t1U ^ t2U;
+            t1L = t1L ^ t2L;
+            this._state1U = t1U;
+            this._state1L = t1L;
+            return [resU, resL];
+        }
+        random() {
+            var t2 = this.randomint();
+            var t2U = t2[0];
+            var t2L = t2[1];
+            var eU = 0x3FF << (52 - 32);
+            var eL = 0;
+            var a1 = 12;
+            var m1 = 0xFFFFFFFF >>> (32 - a1);
+            var sU = t2U >>> a1;
+            var sL = (t2L >>> a1) | ((t2U & m1) << (32 - a1));
+            var xU = eU | sU;
+            var xL = eL | sL;
+            RandX._CONVERTION_BUFFER.setUint32(0, xU, false);
+            RandX._CONVERTION_BUFFER.setUint32(4, xL, false);
+            var d = RandX._CONVERTION_BUFFER.getFloat64(0, false);
+            return d - 1;
+        }
+    }
+    RandX._CONVERTION_BUFFER = new DataView(new ArrayBuffer(8));
+    RandX.defaultRand = new RandX([0, Date.now() / 65536, 0, Date.now() % 65536]);
+
+    exports.ShadowLightType = void 0;
+    (function (ShadowLightType) {
+        ShadowLightType[ShadowLightType["DirectionLight"] = 0] = "DirectionLight";
+        ShadowLightType[ShadowLightType["SpotLight"] = 1] = "SpotLight";
+        ShadowLightType[ShadowLightType["PointLight"] = 2] = "PointLight";
+    })(exports.ShadowLightType || (exports.ShadowLightType = {}));
 
     class CameraCullInfo {
         constructor() {
@@ -28851,243 +29088,6 @@
             Laya3DRender.renderOBJCreate = new LengencyRenderEngine3DFactory();
     });
 
-    class BoundsImpl {
-        get min() {
-            return this.getMin();
-        }
-        set min(value) {
-            this.setMin(value);
-        }
-        get max() {
-            return this.getMax();
-        }
-        set max(value) {
-            this.setMax(value);
-        }
-        setMin(value) {
-            var min = this._boundBox.min;
-            if (value !== min)
-                value.cloneTo(min);
-            this._setUpdateFlag(BoundsImpl._UPDATE_CENTER | BoundsImpl._UPDATE_EXTENT, true);
-            this._setUpdateFlag(BoundsImpl._UPDATE_MIN, false);
-        }
-        getMin() {
-            var min = this._boundBox.min;
-            if (this._getUpdateFlag(BoundsImpl._UPDATE_MIN)) {
-                this._getMin(this.getCenter(), this.getExtent(), min);
-                this._setUpdateFlag(BoundsImpl._UPDATE_MIN, false);
-            }
-            return min;
-        }
-        setMax(value) {
-            var max = this._boundBox.max;
-            if (value !== max)
-                value.cloneTo(max);
-            this._setUpdateFlag(BoundsImpl._UPDATE_CENTER | BoundsImpl._UPDATE_EXTENT, true);
-            this._setUpdateFlag(BoundsImpl._UPDATE_MAX, false);
-        }
-        getMax() {
-            var max = this._boundBox.max;
-            if (this._getUpdateFlag(BoundsImpl._UPDATE_MAX)) {
-                this._getMax(this.getCenter(), this.getExtent(), max);
-                this._setUpdateFlag(BoundsImpl._UPDATE_MAX, false);
-            }
-            return max;
-        }
-        setCenter(value) {
-            if (value !== this._center)
-                value.cloneTo(this._center);
-            this._getMin(this._center, this._extent, this._boundBox.min);
-            this._getMax(this._center, this._extent, this._boundBox.max);
-            this._setUpdateFlag(BoundsImpl._UPDATE_CENTER | BoundsImpl._UPDATE_MIN | BoundsImpl._UPDATE_MAX, false);
-        }
-        getCenter() {
-            if (this._getUpdateFlag(BoundsImpl._UPDATE_CENTER)) {
-                this._getCenter(this.getMin(), this.getMax(), this._center);
-                this._setUpdateFlag(BoundsImpl._UPDATE_CENTER, false);
-            }
-            return this._center;
-        }
-        setExtent(value) {
-            if (value !== this._extent)
-                value.cloneTo(this._extent);
-            this._getMin(this._center, this._extent, this._boundBox.min);
-            this._getMax(this._center, this._extent, this._boundBox.max);
-            this._setUpdateFlag(BoundsImpl._UPDATE_CENTER | BoundsImpl._UPDATE_MIN | BoundsImpl._UPDATE_MAX, false);
-        }
-        getExtent() {
-            if (this._getUpdateFlag(BoundsImpl._UPDATE_EXTENT)) {
-                this._getExtent(this.getMin(), this.getMax(), this._extent);
-                this._setUpdateFlag(BoundsImpl._UPDATE_EXTENT, false);
-            }
-            return this._extent;
-        }
-        constructor(min, max) {
-            this._updateFlag = 0;
-            this._center = new Laya.Vector3();
-            this._extent = new Laya.Vector3();
-            this._boundBox = new BoundBox(new Laya.Vector3(), new Laya.Vector3());
-            min && min.cloneTo(this._boundBox.min);
-            max && max.cloneTo(this._boundBox.max);
-            this._setUpdateFlag(BoundsImpl._UPDATE_MIN | BoundsImpl._UPDATE_MAX, false);
-            this._setUpdateFlag(BoundsImpl._UPDATE_CENTER | BoundsImpl._UPDATE_EXTENT, true);
-        }
-        _getUpdateFlag(type) {
-            return (this._updateFlag & type) != 0;
-        }
-        _setUpdateFlag(type, value) {
-            if (value)
-                this._updateFlag |= type;
-            else
-                this._updateFlag &= ~type;
-        }
-        _getCenter(min, max, out) {
-            Laya.Vector3.add(min, max, out);
-            Laya.Vector3.scale(out, 0.5, out);
-        }
-        _getExtent(min, max, out) {
-            Laya.Vector3.subtract(max, min, out);
-            Laya.Vector3.scale(out, 0.5, out);
-        }
-        _getMin(center, extent, out) {
-            Laya.Vector3.subtract(center, extent, out);
-        }
-        _getMax(center, extent, out) {
-            Laya.Vector3.add(center, extent, out);
-        }
-        _rotateExtents(extents, rotation, out) {
-            var extentsX = extents.x;
-            var extentsY = extents.y;
-            var extentsZ = extents.z;
-            var matE = rotation.elements;
-            out.x = Math.abs(matE[0] * extentsX) + Math.abs(matE[4] * extentsY) + Math.abs(matE[8] * extentsZ);
-            out.y = Math.abs(matE[1] * extentsX) + Math.abs(matE[5] * extentsY) + Math.abs(matE[9] * extentsZ);
-            out.z = Math.abs(matE[2] * extentsX) + Math.abs(matE[6] * extentsY) + Math.abs(matE[10] * extentsZ);
-        }
-        _tranform(matrix, out) {
-            var outCen = out._center;
-            var outExt = out._extent;
-            Laya.Vector3.transformCoordinate(this.getCenter(), matrix, outCen);
-            this._rotateExtents(this.getExtent(), matrix, outExt);
-            out._boundBox.setCenterAndExtent(outCen, outExt);
-            out._updateFlag = 0;
-        }
-        _getBoundBox() {
-            if (this._updateFlag & BoundsImpl._UPDATE_MIN) {
-                var min = this._boundBox.min;
-                this._getMin(this.getCenter(), this.getExtent(), min);
-                this._setUpdateFlag(BoundsImpl._UPDATE_MIN, false);
-            }
-            if (this._updateFlag & BoundsImpl._UPDATE_MAX) {
-                var max = this._boundBox.max;
-                this._getMax(this.getCenter(), this.getExtent(), max);
-                this._setUpdateFlag(BoundsImpl._UPDATE_MAX, false);
-            }
-            return this._boundBox;
-        }
-        calculateBoundsintersection(bounds) {
-            var ownMax = this.getMax();
-            var ownMin = this.getMin();
-            var calMax = bounds.getMax();
-            var calMin = bounds.getMin();
-            var tempV0 = TEMP_VECTOR3_MAX0;
-            var tempV1 = TEMP_VECTOR3_MAX1;
-            var thisExtends = this.getExtent();
-            var boundExtends = bounds.getExtent();
-            tempV0.setValue(Math.max(ownMax.x, calMax.x) - Math.min(ownMin.x, calMin.x), Math.max(ownMax.y, calMax.y) - Math.min(ownMin.y, calMin.y), Math.max(ownMax.z, calMax.z) - Math.min(ownMin.z, calMin.z));
-            tempV1.setValue((thisExtends.x + boundExtends.x) * 2.0, (thisExtends.y + boundExtends.y) * 2.0, (thisExtends.z + boundExtends.z) * 2.0);
-            if ((tempV0.x) > (tempV1.x))
-                return -1;
-            if ((tempV0.y) > (tempV1.y))
-                return -1;
-            if ((tempV0.z) > (tempV1.z))
-                return -1;
-            return (tempV1.x - tempV0.x) * (tempV1.y - tempV0.y) * (tempV1.z - tempV0.z);
-        }
-        cloneTo(destObject) {
-            this.getMin().cloneTo(destObject._boundBox.min);
-            this.getMax().cloneTo(destObject._boundBox.max);
-            this.getCenter().cloneTo(destObject._center);
-            this.getExtent().cloneTo(destObject._extent);
-            destObject._updateFlag = 0;
-        }
-        clone() {
-            var dest = new BoundsImpl(new Laya.Vector3(), new Laya.Vector3());
-            this.cloneTo(dest);
-            return dest;
-        }
-    }
-    BoundsImpl._UPDATE_MIN = 0x01;
-    BoundsImpl._UPDATE_MAX = 0x02;
-    BoundsImpl._UPDATE_CENTER = 0x04;
-    BoundsImpl._UPDATE_EXTENT = 0x08;
-    const TEMP_VECTOR3_MAX0 = new Laya.Vector3();
-    const TEMP_VECTOR3_MAX1 = new Laya.Vector3();
-
-    class RandX {
-        constructor(seed) {
-            if (!(seed instanceof Array) || seed.length !== 4)
-                throw new Error('Rand:Seed must be an array with 4 numbers');
-            this._state0U = seed[0] | 0;
-            this._state0L = seed[1] | 0;
-            this._state1U = seed[2] | 0;
-            this._state1L = seed[3] | 0;
-        }
-        randomint() {
-            var s1U = this._state0U, s1L = this._state0L;
-            var s0U = this._state1U, s0L = this._state1L;
-            var sumL = (s0L >>> 0) + (s1L >>> 0);
-            var resU = (s0U + s1U + (sumL / 2 >>> 31)) >>> 0;
-            var resL = sumL >>> 0;
-            this._state0U = s0U;
-            this._state0L = s0L;
-            var t1U = 0, t1L = 0;
-            var t2U = 0, t2L = 0;
-            var a1 = 23;
-            var m1 = 0xFFFFFFFF << (32 - a1);
-            t1U = (s1U << a1) | ((s1L & m1) >>> (32 - a1));
-            t1L = s1L << a1;
-            s1U = s1U ^ t1U;
-            s1L = s1L ^ t1L;
-            t1U = s1U ^ s0U;
-            t1L = s1L ^ s0L;
-            var a2 = 18;
-            var m2 = 0xFFFFFFFF >>> (32 - a2);
-            t2U = s1U >>> a2;
-            t2L = (s1L >>> a2) | ((s1U & m2) << (32 - a2));
-            t1U = t1U ^ t2U;
-            t1L = t1L ^ t2L;
-            var a3 = 5;
-            var m3 = 0xFFFFFFFF >>> (32 - a3);
-            t2U = s0U >>> a3;
-            t2L = (s0L >>> a3) | ((s0U & m3) << (32 - a3));
-            t1U = t1U ^ t2U;
-            t1L = t1L ^ t2L;
-            this._state1U = t1U;
-            this._state1L = t1L;
-            return [resU, resL];
-        }
-        random() {
-            var t2 = this.randomint();
-            var t2U = t2[0];
-            var t2L = t2[1];
-            var eU = 0x3FF << (52 - 32);
-            var eL = 0;
-            var a1 = 12;
-            var m1 = 0xFFFFFFFF >>> (32 - a1);
-            var sU = t2U >>> a1;
-            var sL = (t2L >>> a1) | ((t2U & m1) << (32 - a1));
-            var xU = eU | sU;
-            var xL = eL | sL;
-            RandX._CONVERTION_BUFFER.setUint32(0, xU, false);
-            RandX._CONVERTION_BUFFER.setUint32(4, xL, false);
-            var d = RandX._CONVERTION_BUFFER.getFloat64(0, false);
-            return d - 1;
-        }
-    }
-    RandX._CONVERTION_BUFFER = new DataView(new ArrayBuffer(8));
-    RandX.defaultRand = new RandX([0, Date.now() / 65536, 0, Date.now() % 65536]);
-
     exports.ECharacterCapable = void 0;
     (function (ECharacterCapable) {
         ECharacterCapable[ECharacterCapable["Charcater_Gravity"] = 0] = "Charcater_Gravity";
@@ -29181,6 +29181,13 @@
                 }
             }
             return pass;
+        }
+    }
+
+    class ShaderDefine {
+        constructor(index, value) {
+            this._index = index;
+            this._value = value;
         }
     }
 
@@ -30601,13 +30608,6 @@
         }
     }
 
-    class ShaderDefine {
-        constructor(index, value) {
-            this._index = index;
-            this._value = value;
-        }
-    }
-
     exports.D6MotionType = void 0;
     (function (D6MotionType) {
         D6MotionType[D6MotionType["eX"] = 0] = "eX";
@@ -30634,314 +30634,6 @@
     })(exports.D6Drive || (exports.D6Drive = {}));
 
     var Script3D = Laya.Script;
-
-    class HLODRender extends BaseRender {
-        constructor() {
-            super();
-            this._singleton = false;
-        }
-        get curHLODRS() {
-            return this._curHLODRS;
-        }
-        set curHLODRS(value) {
-            if (!this._curHLODRS) {
-                this._renderElements = [];
-                this._renderElements.push(new RenderElement());
-                this._renderElements[0].render = this;
-            }
-            if (value != this._curHLODRS) {
-                this._changeMesh(value.HLODMesh);
-                this._curHLODRS = value;
-                this._createRenderelementByHLODElement(this._curHLODRS, this._renderElements[0]);
-            }
-        }
-        _createRenderelementByHLODElement(source, out) {
-            out.setGeometry(source.HLODMesh);
-            out.material = source.material;
-        }
-        _changeMesh(lodMesh) {
-            var defineDatas = this._baseRenderNode.shaderData;
-            this.boundsChange = true;
-            let meshDefines = MeshFilter._meshVerticeDefine;
-            if (this.curHLODRS) {
-                MeshUtil.getMeshDefine(this.curHLODRS.HLODMesh.batchMesh, meshDefines);
-                for (var i = 0, n = meshDefines.length; i < n; i++)
-                    defineDatas.removeDefine(MeshFilter._meshVerticeDefine[i]);
-            }
-            if (lodMesh) {
-                MeshUtil.getMeshDefine(lodMesh.batchMesh, meshDefines);
-                for (var i = 0, n = MeshFilter._meshVerticeDefine.length; i < n; i++)
-                    defineDatas.addDefine(MeshFilter._meshVerticeDefine[i]);
-            }
-            this._curSubBatchMeshBounds.length = lodMesh.batchSubMeshInfo.length;
-            for (let i = 0, n = lodMesh.batchSubMeshInfo.length; i < n; i++) {
-                this._curSubBatchMeshBounds[i] = this._curSubBatchMeshBounds[i] ? this._curSubBatchMeshBounds[i] : new Bounds();
-            }
-        }
-        _applyLightMapParams() {
-            if (!this._scene)
-                return;
-            var shaderValues = this._baseRenderNode.shaderData;
-            var lightMap = this._curHLODRS.lightmap;
-            if (lightMap && lightMap.lightmapColor) {
-                shaderValues.setTexture(RenderableSprite3D.LIGHTMAP, lightMap.lightmapColor);
-                shaderValues.addDefine(RenderableSprite3D.SAHDERDEFINE_LIGHTMAP);
-                if (lightMap.lightmapDirection) {
-                    shaderValues.setTexture(RenderableSprite3D.LIGHTMAP_DIRECTION, lightMap.lightmapDirection);
-                    shaderValues.addDefine(RenderableSprite3D.SHADERDEFINE_LIGHTMAP_DIRECTIONAL);
-                }
-                else {
-                    shaderValues.removeDefine(RenderableSprite3D.SHADERDEFINE_LIGHTMAP_DIRECTIONAL);
-                }
-            }
-            else {
-                shaderValues.removeDefine(RenderableSprite3D.SAHDERDEFINE_LIGHTMAP);
-                shaderValues.removeDefine(RenderableSprite3D.SHADERDEFINE_LIGHTMAP_DIRECTIONAL);
-            }
-        }
-        _calculateBoundingBox() {
-            if (this._curHLODRS) {
-                var sharedMesh = this._curHLODRS.HLODMesh;
-                if (sharedMesh) {
-                    var worldMat = this._transform.worldMatrix;
-                    sharedMesh.batchMesh.bounds._tranform(worldMat, this._bounds);
-                }
-                for (let i = 0, n = this._curSubBatchMeshBounds.length; i < n; i++) {
-                    sharedMesh.batchSubMeshInfo[i].bounds._tranform(worldMat, this._curSubBatchMeshBounds[i]);
-                }
-            }
-        }
-        _renderUpdate(context) {
-            this._applyLightMapParams();
-            this._baseRenderNode.shaderData.setMatrix4x4(Sprite3D.WORLDMATRIX, this._transform.worldMatrix);
-        }
-        _needRender(boundFrustum, context) {
-            if (boundFrustum) {
-                if (boundFrustum.intersects(this.bounds)) {
-                    let hodMesh = this.curHLODRS.HLODMesh.drawSubMeshs;
-                    let lodbatchMesh = this._curHLODRS.HLODMesh.batchSubMeshInfo;
-                    hodMesh.length = 0;
-                    for (let i = 0, n = this._curSubBatchMeshBounds.length; i < n; i++) {
-                        if (boundFrustum.intersects(this._curSubBatchMeshBounds[i])) {
-                            hodMesh.push(lodbatchMesh[i]);
-                        }
-                    }
-                    this._curHLODRS.HLODMesh.drawSubMeshs = hodMesh;
-                    return true;
-                }
-                else
-                    return false;
-            }
-            else {
-                return true;
-            }
-        }
-        onDestroy() {
-            super.onDestroy();
-            this._renderElements.forEach(element => {
-                element.material._removeReference();
-                element.destroy();
-            });
-            this._renderElements = null;
-        }
-    }
-
-    const tempVec = new Laya.Vector3();
-    class HLOD extends Laya.Component {
-        constructor() {
-            super();
-            this._singleton = true;
-        }
-        get bounds() {
-            return this._bounds;
-        }
-        set bounds(value) {
-            this._bounds = value;
-            this.recalculateBounds();
-        }
-        get lodResource() {
-            return this._resourceList;
-        }
-        set lodResource(value) {
-            this._resourceList = value;
-        }
-        get lodCullRateArray() {
-            return this._lodRateArray;
-        }
-        set lodCullRateArray(value) {
-            value.sort((a, b) => b - a);
-            this._lodRateArray = value;
-        }
-        _applyLODResource(resource) {
-            this._curLODSource = resource;
-            let element = resource.resources;
-            for (let i = 0, n = element.length; i < n; i++) {
-                let hlodRender = this.owner.addComponent(HLODRender);
-                this._curRender.push(hlodRender);
-                hlodRender.curHLODRS = element[i];
-            }
-        }
-        _releaseGroupRender() {
-            this._curRender.forEach(element => {
-                element.destroy();
-            });
-            this._curRender = [];
-        }
-        recalculateBounds() {
-            let extend = this._bounds.getExtent();
-            this._size = 2 * Math.max(extend.x, extend.y, extend.z);
-        }
-        onPreRender() {
-            let checkCamera = this.owner.scene.cullInfoCamera;
-            let maxYDistance = checkCamera.maxlocalYDistance;
-            let cameraFrustum = checkCamera.boundFrustum;
-            Laya.Vector3.subtract(this.owner.transform.position, checkCamera.transform.position, tempVec);
-            let length = tempVec.length();
-            if (length > checkCamera.farPlane || cameraFrustum.containsPoint(this.owner.transform.position) == 0) {
-                return;
-            }
-            let rateYDistance = length / checkCamera.farPlane * maxYDistance;
-            let rate = (this._size / rateYDistance);
-            for (let i = 0; i < this._lodRateArray.length; i++) {
-                if (rate < this._lodRateArray[i])
-                    continue;
-                this.applyResource(this._resourceList[i]);
-                break;
-            }
-        }
-        onUpdate() {
-            this._curLODSource.updateMark = Camera._updateMark;
-        }
-        applyResource(resource) {
-            if (resource == this._curLODSource)
-                return;
-            if (resource.loaded) {
-                if (this._curLODSource) {
-                    this._releaseGroupRender();
-                    this._applyLODResource(resource);
-                }
-            }
-            else {
-                resource.load(this.applyResource, this);
-            }
-        }
-    }
-
-    class HLODBatchMesh extends GeometryElement {
-        constructor() {
-            super(Laya.MeshTopology.Triangles, Laya.DrawType.DrawElement);
-        }
-        get batchMesh() {
-            return this._mesh;
-        }
-        set batchMesh(mesh) {
-            if (this._mesh != mesh) {
-                this._mesh && (this._mesh._removeReference());
-                this.indexFormat = mesh.indexFormat;
-                this._mesh = mesh;
-                this._mesh._addReference();
-            }
-        }
-        get batchSubMeshInfo() {
-            return this._batchSubMeshInfos;
-        }
-        set batchSubMeshInfo(value) {
-            this._batchSubMeshInfos = value;
-        }
-        get drawSubMeshs() {
-            return this._drawSubMeshs;
-        }
-        set drawSubMeshs(value) {
-            this._drawSubMeshs = value;
-        }
-        _prepareRender(state) {
-            this._mesh._uploadVerticesData();
-            return true;
-        }
-        _updateRenderParams(state) {
-            var mesh = this._mesh;
-            var byteCount;
-            switch (mesh.indexFormat) {
-                case Laya.IndexFormat.UInt32:
-                    byteCount = 4;
-                    break;
-                case Laya.IndexFormat.UInt16:
-                    byteCount = 2;
-                    break;
-                case Laya.IndexFormat.UInt8:
-                    byteCount = 1;
-                    break;
-            }
-            this.clearRenderParams();
-            this.bufferState = mesh._bufferState;
-            if (this._drawSubMeshs) {
-                this._drawSubMeshs.forEach(element => {
-                    this.setDrawElemenParams(element.drawPramas.y, element.drawPramas.x * byteCount);
-                });
-            }
-        }
-        destroy() {
-            this._mesh && this._mesh._removeReference();
-            delete this._batchSubMeshInfos;
-            delete this._drawSubMeshs;
-        }
-    }
-
-    class HLODConfig {
-    }
-    class HLODBatchSubMesh {
-    }
-    class HLODElement {
-        get material() {
-            return this._material;
-        }
-        set material(value) {
-            if (this._material != value) {
-                this._material && this._material._removeReference();
-                this._material = value;
-                this._material._addReference();
-            }
-        }
-        get lightmap() {
-            return this._lightmap;
-        }
-        set lightmap(value) {
-            if (this._lightmap != value) {
-                if (this._lightmap) {
-                    this._lightmap.lightmapColor._removeReference();
-                    this._lightmap.lightmapDirection._removeReference();
-                }
-                this._lightmap = value;
-                this._lightmap.lightmapColor._addReference();
-                this._lightmap.lightmapDirection._addReference();
-            }
-            this._lightmap = value;
-        }
-        release() {
-            this.HLODMesh.destroy();
-            this.material.destroy();
-            if (this.lightmap) {
-                this._lightmap.lightmapColor.destroy();
-                this._lightmap.lightmapDirection.destroy();
-            }
-        }
-    }
-    class HLODResourceGroup {
-        load(callFun, hlod) {
-            if (!this.loaded) {
-                Laya.Laya.loader.load(this.url, Laya.Handler.create(this, (res) => {
-                    callFun.apply(hlod, [this]);
-                    this.loaded = true;
-                }, [this]));
-            }
-        }
-        release() {
-            this.resources.forEach(element => {
-                element.release();
-            });
-            this.loaded = false;
-        }
-    }
 
     class StaticBatchSubInfo {
         constructor() {
@@ -31297,6 +30989,314 @@
         merge(info) {
             let staticMeshRender = StaticBatchMeshRender.create(info);
             return staticMeshRender;
+        }
+    }
+
+    class HLODRender extends BaseRender {
+        constructor() {
+            super();
+            this._singleton = false;
+        }
+        get curHLODRS() {
+            return this._curHLODRS;
+        }
+        set curHLODRS(value) {
+            if (!this._curHLODRS) {
+                this._renderElements = [];
+                this._renderElements.push(new RenderElement());
+                this._renderElements[0].render = this;
+            }
+            if (value != this._curHLODRS) {
+                this._changeMesh(value.HLODMesh);
+                this._curHLODRS = value;
+                this._createRenderelementByHLODElement(this._curHLODRS, this._renderElements[0]);
+            }
+        }
+        _createRenderelementByHLODElement(source, out) {
+            out.setGeometry(source.HLODMesh);
+            out.material = source.material;
+        }
+        _changeMesh(lodMesh) {
+            var defineDatas = this._baseRenderNode.shaderData;
+            this.boundsChange = true;
+            let meshDefines = MeshFilter._meshVerticeDefine;
+            if (this.curHLODRS) {
+                MeshUtil.getMeshDefine(this.curHLODRS.HLODMesh.batchMesh, meshDefines);
+                for (var i = 0, n = meshDefines.length; i < n; i++)
+                    defineDatas.removeDefine(MeshFilter._meshVerticeDefine[i]);
+            }
+            if (lodMesh) {
+                MeshUtil.getMeshDefine(lodMesh.batchMesh, meshDefines);
+                for (var i = 0, n = MeshFilter._meshVerticeDefine.length; i < n; i++)
+                    defineDatas.addDefine(MeshFilter._meshVerticeDefine[i]);
+            }
+            this._curSubBatchMeshBounds.length = lodMesh.batchSubMeshInfo.length;
+            for (let i = 0, n = lodMesh.batchSubMeshInfo.length; i < n; i++) {
+                this._curSubBatchMeshBounds[i] = this._curSubBatchMeshBounds[i] ? this._curSubBatchMeshBounds[i] : new Bounds();
+            }
+        }
+        _applyLightMapParams() {
+            if (!this._scene)
+                return;
+            var shaderValues = this._baseRenderNode.shaderData;
+            var lightMap = this._curHLODRS.lightmap;
+            if (lightMap && lightMap.lightmapColor) {
+                shaderValues.setTexture(RenderableSprite3D.LIGHTMAP, lightMap.lightmapColor);
+                shaderValues.addDefine(RenderableSprite3D.SAHDERDEFINE_LIGHTMAP);
+                if (lightMap.lightmapDirection) {
+                    shaderValues.setTexture(RenderableSprite3D.LIGHTMAP_DIRECTION, lightMap.lightmapDirection);
+                    shaderValues.addDefine(RenderableSprite3D.SHADERDEFINE_LIGHTMAP_DIRECTIONAL);
+                }
+                else {
+                    shaderValues.removeDefine(RenderableSprite3D.SHADERDEFINE_LIGHTMAP_DIRECTIONAL);
+                }
+            }
+            else {
+                shaderValues.removeDefine(RenderableSprite3D.SAHDERDEFINE_LIGHTMAP);
+                shaderValues.removeDefine(RenderableSprite3D.SHADERDEFINE_LIGHTMAP_DIRECTIONAL);
+            }
+        }
+        _calculateBoundingBox() {
+            if (this._curHLODRS) {
+                var sharedMesh = this._curHLODRS.HLODMesh;
+                if (sharedMesh) {
+                    var worldMat = this._transform.worldMatrix;
+                    sharedMesh.batchMesh.bounds._tranform(worldMat, this._bounds);
+                }
+                for (let i = 0, n = this._curSubBatchMeshBounds.length; i < n; i++) {
+                    sharedMesh.batchSubMeshInfo[i].bounds._tranform(worldMat, this._curSubBatchMeshBounds[i]);
+                }
+            }
+        }
+        _renderUpdate(context) {
+            this._applyLightMapParams();
+            this._baseRenderNode.shaderData.setMatrix4x4(Sprite3D.WORLDMATRIX, this._transform.worldMatrix);
+        }
+        _needRender(boundFrustum, context) {
+            if (boundFrustum) {
+                if (boundFrustum.intersects(this.bounds)) {
+                    let hodMesh = this.curHLODRS.HLODMesh.drawSubMeshs;
+                    let lodbatchMesh = this._curHLODRS.HLODMesh.batchSubMeshInfo;
+                    hodMesh.length = 0;
+                    for (let i = 0, n = this._curSubBatchMeshBounds.length; i < n; i++) {
+                        if (boundFrustum.intersects(this._curSubBatchMeshBounds[i])) {
+                            hodMesh.push(lodbatchMesh[i]);
+                        }
+                    }
+                    this._curHLODRS.HLODMesh.drawSubMeshs = hodMesh;
+                    return true;
+                }
+                else
+                    return false;
+            }
+            else {
+                return true;
+            }
+        }
+        onDestroy() {
+            super.onDestroy();
+            this._renderElements.forEach(element => {
+                element.material._removeReference();
+                element.destroy();
+            });
+            this._renderElements = null;
+        }
+    }
+
+    const tempVec = new Laya.Vector3();
+    class HLOD extends Laya.Component {
+        constructor() {
+            super();
+            this._singleton = true;
+        }
+        get bounds() {
+            return this._bounds;
+        }
+        set bounds(value) {
+            this._bounds = value;
+            this.recalculateBounds();
+        }
+        get lodResource() {
+            return this._resourceList;
+        }
+        set lodResource(value) {
+            this._resourceList = value;
+        }
+        get lodCullRateArray() {
+            return this._lodRateArray;
+        }
+        set lodCullRateArray(value) {
+            value.sort((a, b) => b - a);
+            this._lodRateArray = value;
+        }
+        _applyLODResource(resource) {
+            this._curLODSource = resource;
+            let element = resource.resources;
+            for (let i = 0, n = element.length; i < n; i++) {
+                let hlodRender = this.owner.addComponent(HLODRender);
+                this._curRender.push(hlodRender);
+                hlodRender.curHLODRS = element[i];
+            }
+        }
+        _releaseGroupRender() {
+            this._curRender.forEach(element => {
+                element.destroy();
+            });
+            this._curRender = [];
+        }
+        recalculateBounds() {
+            let extend = this._bounds.getExtent();
+            this._size = 2 * Math.max(extend.x, extend.y, extend.z);
+        }
+        onPreRender() {
+            let checkCamera = this.owner.scene.cullInfoCamera;
+            let maxYDistance = checkCamera.maxlocalYDistance;
+            let cameraFrustum = checkCamera.boundFrustum;
+            Laya.Vector3.subtract(this.owner.transform.position, checkCamera.transform.position, tempVec);
+            let length = tempVec.length();
+            if (length > checkCamera.farPlane || cameraFrustum.containsPoint(this.owner.transform.position) == 0) {
+                return;
+            }
+            let rateYDistance = length / checkCamera.farPlane * maxYDistance;
+            let rate = (this._size / rateYDistance);
+            for (let i = 0; i < this._lodRateArray.length; i++) {
+                if (rate < this._lodRateArray[i])
+                    continue;
+                this.applyResource(this._resourceList[i]);
+                break;
+            }
+        }
+        onUpdate() {
+            this._curLODSource.updateMark = Camera._updateMark;
+        }
+        applyResource(resource) {
+            if (resource == this._curLODSource)
+                return;
+            if (resource.loaded) {
+                if (this._curLODSource) {
+                    this._releaseGroupRender();
+                    this._applyLODResource(resource);
+                }
+            }
+            else {
+                resource.load(this.applyResource, this);
+            }
+        }
+    }
+
+    class HLODBatchMesh extends GeometryElement {
+        constructor() {
+            super(Laya.MeshTopology.Triangles, Laya.DrawType.DrawElement);
+        }
+        get batchMesh() {
+            return this._mesh;
+        }
+        set batchMesh(mesh) {
+            if (this._mesh != mesh) {
+                this._mesh && (this._mesh._removeReference());
+                this.indexFormat = mesh.indexFormat;
+                this._mesh = mesh;
+                this._mesh._addReference();
+            }
+        }
+        get batchSubMeshInfo() {
+            return this._batchSubMeshInfos;
+        }
+        set batchSubMeshInfo(value) {
+            this._batchSubMeshInfos = value;
+        }
+        get drawSubMeshs() {
+            return this._drawSubMeshs;
+        }
+        set drawSubMeshs(value) {
+            this._drawSubMeshs = value;
+        }
+        _prepareRender(state) {
+            this._mesh._uploadVerticesData();
+            return true;
+        }
+        _updateRenderParams(state) {
+            var mesh = this._mesh;
+            var byteCount;
+            switch (mesh.indexFormat) {
+                case Laya.IndexFormat.UInt32:
+                    byteCount = 4;
+                    break;
+                case Laya.IndexFormat.UInt16:
+                    byteCount = 2;
+                    break;
+                case Laya.IndexFormat.UInt8:
+                    byteCount = 1;
+                    break;
+            }
+            this.clearRenderParams();
+            this.bufferState = mesh._bufferState;
+            if (this._drawSubMeshs) {
+                this._drawSubMeshs.forEach(element => {
+                    this.setDrawElemenParams(element.drawPramas.y, element.drawPramas.x * byteCount);
+                });
+            }
+        }
+        destroy() {
+            this._mesh && this._mesh._removeReference();
+            delete this._batchSubMeshInfos;
+            delete this._drawSubMeshs;
+        }
+    }
+
+    class HLODConfig {
+    }
+    class HLODBatchSubMesh {
+    }
+    class HLODElement {
+        get material() {
+            return this._material;
+        }
+        set material(value) {
+            if (this._material != value) {
+                this._material && this._material._removeReference();
+                this._material = value;
+                this._material._addReference();
+            }
+        }
+        get lightmap() {
+            return this._lightmap;
+        }
+        set lightmap(value) {
+            if (this._lightmap != value) {
+                if (this._lightmap) {
+                    this._lightmap.lightmapColor._removeReference();
+                    this._lightmap.lightmapDirection._removeReference();
+                }
+                this._lightmap = value;
+                this._lightmap.lightmapColor._addReference();
+                this._lightmap.lightmapDirection._addReference();
+            }
+            this._lightmap = value;
+        }
+        release() {
+            this.HLODMesh.destroy();
+            this.material.destroy();
+            if (this.lightmap) {
+                this._lightmap.lightmapColor.destroy();
+                this._lightmap.lightmapDirection.destroy();
+            }
+        }
+    }
+    class HLODResourceGroup {
+        load(callFun, hlod) {
+            if (!this.loaded) {
+                Laya.Laya.loader.load(this.url, Laya.Handler.create(this, (res) => {
+                    callFun.apply(hlod, [this]);
+                    this.loaded = true;
+                }, [this]));
+            }
+        }
+        release() {
+            this.resources.forEach(element => {
+                element.release();
+            });
+            this.loaded = false;
         }
     }
 

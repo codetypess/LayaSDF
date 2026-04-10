@@ -139,9 +139,10 @@ GLSL Start
             vec3 shadowMsdf = texture2D(u_spriteTexture, shadowTexcoord).rgb;
             float shadowSd = median3(shadowMsdf.r, shadowMsdf.g, shadowMsdf.b);
             float shadowScreenDistance = screenPxRange(shadowTexcoord) * (shadowSd - 0.5);
+            float shadowShapeDistance = shadowScreenDistance + outlineWidth;
             shadowAlpha = shadowBlur > 0.0
-                ? smoothstep(-shadowBlur, shadowBlur, shadowScreenDistance)
-                : clamp(shadowScreenDistance + 0.5, 0.0, 1.0);
+                ? smoothstep(-shadowBlur, shadowBlur, shadowShapeDistance)
+                : clamp(shadowShapeDistance + 0.5, 0.0, 1.0);
             shadowAlpha *= (1.0 - strokeAlpha);
         }
 

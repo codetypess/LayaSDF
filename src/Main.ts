@@ -8,21 +8,25 @@ export class Main extends Laya.Script {
     onStart() {
         Laya.stage.bgColor = "#0f1722";
 
+        const box = new Laya.Box();
+
         this.owner.addChild(this.createPanel());
+        this.owner.addChild(box);
+
 
         const title = new MsdfLabel("MSDF文字演示");
         title.fontSize = 86;
         title.color = "#f9e38f";
         title.strokeColor = "#0d906b";
         title.stroke = 4;
-        title.glow = 5;
+        // title.glow = 5;
         title.glowColor = "#e5e830cc";
-        title.shadowColor = "#041520cc";
-        title.shadowBlur = 2;
-        title.shadowOffsetX = 6;
-        title.shadowOffsetY = 6;
+        title.shadowColor = "#041520ff";
+        title.shadowBlur = 0;
+        title.shadowOffsetX = 4;
+        title.shadowOffsetY = 4;
         title.pos(80, 30);
-        this.owner.addChild(title);
+        box.addChild(title);
 
         const sectionTitle = new Laya.Label();
         sectionTitle.text = "描边对比：统一 stroke = 3，观察 20 / 25 / 30 / 35 / 40 / 45";
@@ -30,7 +34,7 @@ export class Main extends Laya.Script {
         sectionTitle.color = "#bae7fa";
         sectionTitle.font = "resources/source-han-sans-cn-medium.ttf";
         sectionTitle.pos(84, 130);
-        this.owner.addChild(sectionTitle);
+        box.addChild(sectionTitle);
 
         const sizes = [20, 25, 30, 35, 40, 45];
         // const strokes = [1.5, 2.5, 3, 3, 3, 3];
@@ -42,7 +46,7 @@ export class Main extends Laya.Script {
             const fontSize = sizes[i];
             const sample = this.createSampleLabel(fontSize, strokes[i], strokeColors[i]);
             sample.pos(84, leftY);
-            this.owner.addChild(sample);
+            box.addChild(sample);
 
             leftY += fontSize + 20;
         }
@@ -69,14 +73,14 @@ export class Main extends Laya.Script {
         wrapped.valign = "middle";
         wrapped.size(640, 118);
         wrapped.pos(84, 490);
-        this.owner.addChild(wrapped);
+        box.addChild(wrapped);
 
         const note = new Laya.Label();
         note.text = "富文本使用方式与 Laya Label 一致：文本放在 text，配合 html=true 或 ubb=true。";
         note.fontSize = 20;
         note.color = "#9cb4c7";
         note.pos(84, 602);
-        this.owner.addChild(note);
+        box.addChild(note);
     }
 
     private createSampleLabel(fontSize: number, stroke: number, strokeColor: string): MsdfLabel {

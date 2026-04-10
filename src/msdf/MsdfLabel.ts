@@ -96,6 +96,7 @@ export class MsdfLabel extends Laya.UIComponent {
     private _fontJsonUrl = DEFAULT_MSDF_FONT_JSON_URL;
     private _fontShaderUrl = DEFAULT_MSDF_SHADER_URL;
     private _paddingValues: Padding = [0, 0, 0, 0];
+    private _maxOutlineWidth = 0;
 
     constructor(text?: string) {
         super(false);
@@ -471,23 +472,21 @@ export class MsdfLabel extends Laya.UIComponent {
     }
 
     protected measureWidth(): number {
-        const shadowInsets = this.getShadowInsets();
+        const effectInsets = this.getEffectInsets();
         return (this._textSprite?.contentWidth ?? 0)
             + this._paddingValues[1]
             + this._paddingValues[3]
-            + this.getGlowPadding() * 2
-            + shadowInsets[1]
-            + shadowInsets[3];
+            + effectInsets[1]
+            + effectInsets[3];
     }
 
     protected measureHeight(): number {
-        const shadowInsets = this.getShadowInsets();
+        const effectInsets = this.getEffectInsets();
         return (this._textSprite?.contentHeight ?? 0)
             + this._paddingValues[0]
             + this._paddingValues[2]
-            + this.getGlowPadding() * 2
-            + shadowInsets[0]
-            + shadowInsets[2];
+            + effectInsets[0]
+            + effectInsets[2];
     }
 
     protected commitMeasure(): void {
@@ -652,21 +651,29 @@ export class MsdfLabel extends Laya.UIComponent {
         return runs;
     }
 
-    private getGlowPadding(): number {
-        return this._glow > 0 ? Math.ceil(this._glow) : 0;
+    private getMaxOutlineWidth(runs?: MsdfRichTextRun[]): number {
+        let maxOutlineWidth = Math.max(this._stroke, 0);
+        const sourceRuns = runs ?? this.buildTextRuns();
+        for (const run of sourceRuns) {
+            maxOutlineWidth = Math.max(maxOutlineWidth, run.style.outlineWidth || 0);
+        }
+        return maxOutlineWidth;
     }
 
-    private getShadowInsets(): Padding {
+    private getEffectInsets(maxOutlineWidth: number = this._maxOutlineWidth): Padding {
+        const outlineExtent = Math.max(maxOutlineWidth, 0);
+        const primaryInset = Math.ceil(outlineExtent + Math.max(this._glow, 0));
+
         if (this._shadowBlur <= 0 && this._shadowOffsetX === 0 && this._shadowOffsetY === 0) {
-            return [0, 0, 0, 0];
+            return [primaryInset, primaryInset, primaryInset, primaryInset];
         }
 
-        const radius = Math.ceil(this._shadowBlur);
+        const shadowBaseInset = outlineExtent + Math.ceil(this._shadowBlur);
         return [
-            Math.max(0, Math.ceil(radius - this._shadowOffsetY)),
-            Math.max(0, Math.ceil(radius - this._shadowOffsetX)),
-            Math.max(0, Math.ceil(radius + this._shadowOffsetY)),
-            Math.max(0, Math.ceil(radius + this._shadowOffsetX))
+            Math.max(primaryInset, Math.max(0, Math.ceil(shadowBaseInset - this._shadowOffsetY))),
+            Math.max(primaryInset, Math.max(0, Math.ceil(shadowBaseInset + this._shadowOffsetX))),
+            Math.max(primaryInset, Math.max(0, Math.ceil(shadowBaseInset + this._shadowOffsetY))),
+            Math.max(primaryInset, Math.max(0, Math.ceil(shadowBaseInset - this._shadowOffsetX)))
         ];
     }
 
@@ -675,11 +682,12 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
 
+        const runs = this.buildTextRuns();
+        this._maxOutlineWidth = this.getMaxOutlineWidth(runs);
         const padding = this._paddingValues;
-        const glowPadding = this.getGlowPadding();
-        const shadowInsets = this.getShadowInsets();
+        const effectInsets = this.getEffectInsets(this._maxOutlineWidth);
         const availableWidth = this._hasExplicitWidth
-            ? Math.max(this.width - padding[1] - padding[3] - glowPadding * 2 - shadowInsets[1] - shadowInsets[3], 0)
+            ? Math.max(this.width - padding[1] - padding[3] - effectInsets[1] - effectInsets[3], 0)
             : 0;
         const wrapWidth = this._wordWrap && this._hasExplicitWidth ? availableWidth : 0;
 
@@ -695,7 +703,7 @@ export class MsdfLabel extends Laya.UIComponent {
             this._shadowOffsetY,
             this._shadowBlur
         );
-        this._textSprite.setRuns(this.buildTextRuns());
+        this._textSprite.setRuns(runs);
         this._textSprite.refresh();
         this.updateLayoutFrame();
     }
@@ -706,18 +714,17 @@ export class MsdfLabel extends Laya.UIComponent {
         }
 
         const padding = this._paddingValues;
-        const glowPadding = this.getGlowPadding();
-        const shadowInsets = this.getShadowInsets();
-        const measuredWidth = this._textSprite.contentWidth + padding[1] + padding[3] + glowPadding * 2 + shadowInsets[1] + shadowInsets[3];
-        const measuredHeight = this._textSprite.contentHeight + padding[0] + padding[2] + glowPadding * 2 + shadowInsets[0] + shadowInsets[2];
+        const effectInsets = this.getEffectInsets();
+        const measuredWidth = this._textSprite.contentWidth + padding[1] + padding[3] + effectInsets[1] + effectInsets[3];
+        const measuredHeight = this._textSprite.contentHeight + padding[0] + padding[2] + effectInsets[0] + effectInsets[2];
         const layoutWidth = this._hasExplicitWidth ? this.width : measuredWidth;
         const layoutHeight = this._hasExplicitHeight ? this.height : measuredHeight;
         const availableHeight = this._hasExplicitHeight
-            ? Math.max(layoutHeight - padding[0] - padding[2] - glowPadding * 2 - shadowInsets[0] - shadowInsets[2], 0)
+            ? Math.max(layoutHeight - padding[0] - padding[2] - effectInsets[0] - effectInsets[2], 0)
             : this._textSprite.contentHeight;
 
-        const x = padding[3] + glowPadding + shadowInsets[3];
-        let y = padding[0] + glowPadding + shadowInsets[0];
+        const x = padding[3] + effectInsets[3];
+        let y = padding[0] + effectInsets[0];
         if (this._valign === "middle") {
             y += Math.max((availableHeight - this._textSprite.contentHeight) * 0.5, 0);
         } else if (this._valign === "bottom") {
