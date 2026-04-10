@@ -1015,6 +1015,8 @@ export class MsdfLabel extends Laya.UIComponent {
     }
 
     private buildTextRuns(): MsdfRichTextRun[] {
+        // MsdfLabel 负责把原始文本解析成带样式的 runs，
+        // MsdfTextSprite 只接收已经解析完成的 runs 和布局约束。
         let sourceText = this._text.replace(NORMALIZE_CR, "\n");
         if (this._parseEscapeChars) {
             sourceText = sourceText.replace(ESCAPE_CHARS_PATTERN, MsdfLabel.replaceEscapeChar);
@@ -1107,6 +1109,8 @@ export class MsdfLabel extends Laya.UIComponent {
         const runs = this.buildTextRuns();
         this._maxOutlineWidth = this.getMaxOutlineWidth(runs);
         const effectInsets = this.getEffectInsets(this._maxOutlineWidth);
+        // 真正参与排版的是扣掉 padding 和效果外扩后的内容区。
+        // glow/shadow/outline 虽然是视觉效果，但它们会占用标签的可用排版空间。
         const explicitContentBox = this.getContentBox({ width: this.width, height: this.height }, effectInsets);
         const availableWidth = this._hasExplicitWidth ? explicitContentBox.width : Number.MAX_VALUE;
         const availableHeight = this._hasExplicitHeight ? explicitContentBox.height : 0;
@@ -1159,6 +1163,7 @@ export class MsdfLabel extends Laya.UIComponent {
             ? this.getContentBox(layoutSize, effectInsets)
             : { ...this.getContentBox(layoutSize, effectInsets), height: this._textSprite.contentHeight };
 
+        // MsdfTextSprite 始终从 (0, 0) 画起，Label 的对齐结果通过视口偏移表达。
         let y = contentBox.y;
         if (this._valign === "middle") {
             y += Math.max((contentBox.height - this._textSprite.contentHeight) * 0.5, 0);

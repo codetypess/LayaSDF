@@ -98,6 +98,7 @@ GLSL Start
     }
 
     float screenPxRange(vec2 texcoord) {
+        // 把图集空间里的 distance range 换算成当前屏幕空间里的像素宽度。
         vec2 unitRange = vec2(u_DistanceRange) / u_AtlasSize;
         vec2 screenTexSize = vec2(1.0) / max(fwidth(texcoord), vec2(0.0001));
         return max(0.5 * dot(unitRange, screenTexSize), 1.0);
@@ -107,6 +108,7 @@ GLSL Start
         clip();
 
         vec2 texcoord = v_texcoordAlpha.xy;
+        // MSDF 的 RGB 存的是距离值，取 median 后可以恢复出边缘的有符号距离。
         vec3 msdf = texture2D(u_spriteTexture, texcoord).rgb;
         float sd = median3(msdf.r, msdf.g, msdf.b);
         float screenDistance = screenPxRange(texcoord) * (sd - 0.5);
@@ -124,6 +126,7 @@ GLSL Start
         float shadowBlur = hasShadow ? v_msdfPackedParamsA.z * PACKED_EFFECT_SIZE_MAX : 0.0;
         vec2 shadowOffset = v_msdfPackedParamsB.xy * SHADOW_OFFSET_INV_SCALE;
 
+        // fill 是字形本体覆盖率，outline/glow 则由“距离边缘还有多远”推导出来。
         float fillAlpha = clamp(screenDistance + 0.5, 0.0, 1.0);
         float strokeAlpha = clamp(screenDistance + outlineWidth + 0.5, 0.0, 1.0);
         float outlineAlpha = max(strokeAlpha - fillAlpha, 0.0);
@@ -135,6 +138,7 @@ GLSL Start
 
         float shadowAlpha = 0.0;
         if (shadowColor.a > 0.0 && (shadowBlur > 0.0 || shadowOffset.x != 0.0 || shadowOffset.y != 0.0)) {
+            // 阴影会在偏移后的 texcoord 上再次采样同一份 MSDF，再单独做模糊和衰减。
             vec2 shadowTexcoord = texcoord - (dFdx(texcoord) * shadowOffset.x - dFdy(texcoord) * shadowOffset.y);
             vec3 shadowMsdf = texture2D(u_spriteTexture, shadowTexcoord).rgb;
             float shadowSd = median3(shadowMsdf.r, shadowMsdf.g, shadowMsdf.b);

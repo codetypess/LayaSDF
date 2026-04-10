@@ -35,6 +35,7 @@ type MsdfFontJson = {
 };
 
 type MsdfLayout = {
+    // 本地文本坐标系下的几何数据，最终的绘制偏移和裁剪会在更后面的阶段处理。
     vertices: Float32Array;
     uvs: Float32Array;
     indices: Uint16Array;
@@ -44,6 +45,7 @@ type MsdfLayout = {
 };
 
 type MsdfDrawBatch = {
+    // 一次 GPU 提交所需的完整数据，已经把布局和样式都展开成按顶点存储。
     vertices: Float32Array;
     uvs: Float32Array;
     indices: Uint16Array;
@@ -56,6 +58,7 @@ type MsdfDrawBatch = {
 };
 
 type MsdfViewFrame = {
+    // 来自 MsdfLabel 的视口信息。文本几何本身仍然保持在本地坐标里。
     width: number;
     height: number;
     drawOffsetX: number;
@@ -80,6 +83,28 @@ type MsdfDrawBatchGroup = {
     uvFloatCount: number;
     indexCount: number;
     vertexCount: number;
+};
+
+type MsdfPlainTextBatchCache = {
+    // 纯文本经常在布局不变的情况下重复重绘，这里缓存展开后的按顶点样式数组，
+    // 避免滚动或视口更新时每次都重新构造颜色和效果参数。
+    layout: MsdfLayout | null;
+    fillDefaultPacked: number;
+    fillUnderlinePacked: number;
+    fillStrikethroughPacked: number;
+    outlineDefaultPacked: number;
+    outlineUnderlinePacked: number;
+    outlineStrikethroughPacked: number;
+    glowPacked: number;
+    shadowPacked: number;
+    packedParamsAValue: number;
+    packedParamsBValue: number;
+    fillColors: Uint32Array | null;
+    outlineColors: Uint32Array | null;
+    glowColors: Uint32Array | null;
+    shadowColors: Uint32Array | null;
+    packedParamsA: Uint32Array | null;
+    packedParamsB: Uint32Array | null;
 };
 
 type MsdfTextOptions = {
@@ -200,7 +225,8 @@ const LARGE_DECORATION_SCALE_THRESHOLD = 1.75;
 const LARGE_DECORATION_THICKNESS_BOOST = 1;
 const UNDERLINE_EXTRA_OFFSET_MIN = 0.75;
 const UNDERLINE_EXTRA_OFFSET_SCALE = 0.55;
-// Keep this in sync with scripts/msdf-decoration.mjs.
+// 图集里会额外注入一个私有字形，运行时把它拉伸成下划线和删除线。
+// 这里的字符编码需要和 scripts/msdf-decoration.mjs 保持一致。
 const DECORATION_SOURCE_CHAR_CODE = 0xe000;
 const DECORATION_SOURCE_CHAR = String.fromCodePoint(DECORATION_SOURCE_CHAR_CODE);
 const emojiTest = /[\uD800-\uDBFF][\uDC00-\uDFFF]/;
@@ -226,6 +252,28 @@ function createEmptyLayout(): MsdfLayout {
         quadKinds: new Uint8Array(0),
         width: 0,
         height: 0
+    };
+}
+
+function createEmptyPlainTextBatchCache(): MsdfPlainTextBatchCache {
+    return {
+        layout: null,
+        fillDefaultPacked: -1,
+        fillUnderlinePacked: -1,
+        fillStrikethroughPacked: -1,
+        outlineDefaultPacked: -1,
+        outlineUnderlinePacked: -1,
+        outlineStrikethroughPacked: -1,
+        glowPacked: -1,
+        shadowPacked: -1,
+        packedParamsAValue: -1,
+        packedParamsBValue: -1,
+        fillColors: null,
+        outlineColors: null,
+        glowColors: null,
+        shadowColors: null,
+        packedParamsA: null,
+        packedParamsB: null
     };
 }
 
@@ -462,24 +510,32 @@ function effectFlags(outlineWidth: number, outlineColor: Laya.Vector4, glowSize:
 
 function createPackedParamsAArray(outlineWidth: number, glowSize: number, shadowBlur: number, vertexCount: number): Uint32Array {
     const values = new Uint32Array(vertexCount);
-    const packed = (
-        packNormalizedByte(outlineWidth, PACKED_EFFECT_SIZE_MAX)
-        | (packNormalizedByte(glowSize, PACKED_EFFECT_SIZE_MAX) << 8)
-        | (packNormalizedByte(shadowBlur, PACKED_EFFECT_SIZE_MAX) << 16)
-    ) >>> 0;
+    const packed = packParamsAValue(outlineWidth, glowSize, shadowBlur);
     values.fill(packed);
     return values;
 }
 
 function createPackedParamsBArray(shadowOffsetX: number, shadowOffsetY: number, flags: number, vertexCount: number): Uint32Array {
     const values = new Uint32Array(vertexCount);
-    const packed = (
+    const packed = packParamsBValue(shadowOffsetX, shadowOffsetY, flags);
+    values.fill(packed);
+    return values;
+}
+
+function packParamsAValue(outlineWidth: number, glowSize: number, shadowBlur: number): number {
+    return (
+        packNormalizedByte(outlineWidth, PACKED_EFFECT_SIZE_MAX)
+        | (packNormalizedByte(glowSize, PACKED_EFFECT_SIZE_MAX) << 8)
+        | (packNormalizedByte(shadowBlur, PACKED_EFFECT_SIZE_MAX) << 16)
+    ) >>> 0;
+}
+
+function packParamsBValue(shadowOffsetX: number, shadowOffsetY: number, flags: number): number {
+    return (
         packSignedByte(shadowOffsetX * PACKED_SHADOW_OFFSET_SCALE)
         | (packSignedByte(shadowOffsetY * PACKED_SHADOW_OFFSET_SCALE) << 8)
         | ((flags & 0xff) << 16)
     ) >>> 0;
-    values.fill(packed);
-    return values;
 }
 
 function isHighSurrogate(code: number): boolean {
@@ -707,6 +763,8 @@ export class MsdfBitmapFont {
     }
 
     buildLayout(text: string, fontSize: number, letterSpacing: number = 0, lineSpacing: number = 0, decorations: MsdfDecorationOptions = {}): MsdfLayout {
+        // 先把文本转换成可复用的四边形布局。这个阶段只负责生成本地字形几何，
+        // 不处理裁剪、滚动、发光/阴影叠加顺序，也不关心最终屏幕上的偏移。
         const scale = fontSize / this.lineHeight;
         const scaledLetterSpacing = letterSpacing * scale;
         const vertices: number[] = [];
@@ -737,6 +795,7 @@ export class MsdfBitmapFont {
         let lineIndex = 0;
 
         const pushQuad = (glyph: MsdfGlyph, left: number, top: number, right: number, bottom: number, quadKind: number = QUAD_KIND_TEXT): void => {
+            // 每个字形或装饰线最终都对应一个带 UV 的四边形。
             const u0 = glyph.x / this.atlasWidth;
             const v0 = glyph.y / this.atlasHeight;
             const u1 = (glyph.x + glyph.width) / this.atlasWidth;
@@ -821,6 +880,7 @@ export class MsdfBitmapFont {
         lineInfos[lineIndex].advanceWidth = currentLineWidth;
 
         if (decorations.underline || decorations.strikethrough) {
+            // 装饰线复用注入图集的那个私有字形，但会按每一行的宽度拉伸。
             const decorationGlyph = this.decorationGlyph;
             const decorationMetrics = this.getDecorationRenderMetrics(fontSize);
 
@@ -868,6 +928,7 @@ export class MsdfBitmapFont {
 
         const shiftY = minY < 0 ? minY : 0;
 
+        // 把布局归一化到以文本块左上附近为原点，外部就能用一次整体偏移去放置它。
         for (let i = 0; i < vertices.length; i += 2) {
             vertices[i] -= minX;
             vertices[i + 1] -= shiftY;
@@ -929,6 +990,8 @@ export class MsdfTextSprite extends Laya.Sprite {
     private _scrollY = 0;
     private _lines: MsdfTextLineMetric[] = [];
     private _drawBatches: MsdfDrawBatch[] = [];
+    private _plainTextLayoutDirty = true;
+    private _plainTextBatchCache: MsdfPlainTextBatchCache = createEmptyPlainTextBatchCache();
 
     constructor(private font: MsdfBitmapFont | null = null, options: MsdfTextOptions = {}) {
         super();
@@ -969,6 +1032,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         this._text = value ?? "";
         this._usesRuns = false;
         this._runs = [];
+        this._plainTextLayoutDirty = true;
         this.refresh();
     }
 
@@ -977,6 +1041,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             return;
         }
         this._fontSize = value;
+        this._plainTextLayoutDirty = true;
         this.refresh();
     }
 
@@ -985,6 +1050,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             return;
         }
         this._letterSpacing = value;
+        this._plainTextLayoutDirty = true;
         this.refresh();
     }
 
@@ -993,6 +1059,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             return;
         }
         this._lineSpacing = value;
+        this._plainTextLayoutDirty = true;
         this.refresh();
     }
 
@@ -1101,6 +1168,7 @@ export class MsdfTextSprite extends Laya.Sprite {
     set textColor(value: Laya.Vector4) {
         this._textColor = value;
         if (!this._usesRuns) {
+            this.invalidatePlainTextBatchCache();
             this.refresh();
         }
     }
@@ -1108,6 +1176,7 @@ export class MsdfTextSprite extends Laya.Sprite {
     set underlineColor(value: Laya.Vector4 | null) {
         this._underlineColor = value;
         if (!this._usesRuns) {
+            this.invalidatePlainTextBatchCache();
             this.refresh();
         }
     }
@@ -1115,6 +1184,7 @@ export class MsdfTextSprite extends Laya.Sprite {
     set strikethroughColor(value: Laya.Vector4 | null) {
         this._strikethroughColor = value;
         if (!this._usesRuns) {
+            this.invalidatePlainTextBatchCache();
             this.refresh();
         }
     }
@@ -1122,6 +1192,7 @@ export class MsdfTextSprite extends Laya.Sprite {
     set outlineColor(value: Laya.Vector4) {
         this._outlineColor = value;
         if (!this._usesRuns) {
+            this.invalidatePlainTextBatchCache();
             this.refresh();
         }
     }
@@ -1129,23 +1200,27 @@ export class MsdfTextSprite extends Laya.Sprite {
     set outlineWidth(value: number) {
         this._outlineWidth = value;
         if (!this._usesRuns) {
+            this.invalidatePlainTextBatchCache();
             this.refresh();
         }
     }
 
     set glowColor(value: Laya.Vector4) {
         this._glowColor = value;
+        this.invalidatePlainTextBatchCache();
         this.refresh();
     }
 
     set glowSize(value: number) {
         this._glowSize = Math.max(0, value);
+        this.invalidatePlainTextBatchCache();
         this.refresh();
     }
 
     setGlowStyle(color: Laya.Vector4, size: number): void {
         this._glowColor = color;
         this._glowSize = Math.max(0, size);
+        this.invalidatePlainTextBatchCache();
     }
 
     setShadowStyle(color: Laya.Vector4, offsetX: number, offsetY: number, blur: number): void {
@@ -1153,6 +1228,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         this._shadowOffsetX = offsetX;
         this._shadowOffsetY = offsetY;
         this._shadowBlur = Math.max(0, blur);
+        this.invalidatePlainTextBatchCache();
     }
 
     setViewportFrame(viewportWidth: number, viewportHeight: number, drawOffsetX: number, drawOffsetY: number, clipRectX: number, clipRectY: number, clipRectWidth: number, clipRectHeight: number): void {
@@ -1181,6 +1257,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             return;
         }
         this._underline = value;
+        this._plainTextLayoutDirty = true;
         this.refresh();
     }
 
@@ -1189,6 +1266,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             return;
         }
         this._strikethrough = value;
+        this._plainTextLayoutDirty = true;
         this.refresh();
     }
 
@@ -1201,6 +1279,8 @@ export class MsdfTextSprite extends Laya.Sprite {
         this.font = font;
         this.materialInstance = this.font.renderState.material;
         this.material = this.materialInstance;
+        this._plainTextLayoutDirty = true;
+        this.invalidatePlainTextBatchCache();
         this.refresh();
     }
 
@@ -1268,6 +1348,101 @@ export class MsdfTextSprite extends Laya.Sprite {
         this._scrollY = Math.min(this._scrollY, this.maxScrollY);
     }
 
+    private invalidatePlainTextBatchCache(): void {
+        this._plainTextBatchCache = createEmptyPlainTextBatchCache();
+    }
+
+    private getPlainTextLayout(): MsdfLayout {
+        // 纯文本布局只会在真正影响字形形状的属性变化时重建。
+        if (this._plainTextLayoutDirty) {
+            this._layout = this.font.buildLayout(
+                this._text,
+                this._fontSize,
+                this._letterSpacing,
+                this._lineSpacing,
+                {
+                    underline: this._underline,
+                    strikethrough: this._strikethrough
+                }
+            );
+            this._plainTextLayoutDirty = false;
+            this.invalidatePlainTextBatchCache();
+        }
+
+        return this._layout;
+    }
+
+    private getPlainTextBatchStyleData(layout: MsdfLayout, vertexCount: number, flags: number): Omit<MsdfDrawBatch, "vertices" | "uvs" | "indices"> {
+        // layout 已经标明了哪些 quad 是正文、下划线或删除线。
+        // 这里把高层样式参数一次性展开成按顶点存储的打包数组，供 drawTrianglesMSDF 直接消费。
+        const cache = this._plainTextBatchCache;
+        if (cache.layout !== layout) {
+            this.invalidatePlainTextBatchCache();
+            this._plainTextBatchCache.layout = layout;
+        }
+
+        const nextCache = this._plainTextBatchCache;
+        const fillDefaultPacked = packVertexColor(this._textColor);
+        const fillUnderlinePacked = packVertexColor(this._underlineColor ?? this._textColor);
+        const fillStrikethroughPacked = packVertexColor(this._strikethroughColor ?? this._textColor);
+        const outlineDefaultPacked = packVertexColor(this._outlineColor);
+        const outlineUnderlinePacked = packVertexColor(this._underlineColor ?? this._outlineColor);
+        const outlineStrikethroughPacked = packVertexColor(this._strikethroughColor ?? this._outlineColor);
+        const glowPacked = packVertexColor(this._glowColor);
+        const shadowPacked = packVertexColor(this._shadowColor);
+        const packedParamsAValue = packParamsAValue(this._outlineWidth, this._glowSize, this._shadowBlur);
+        const packedParamsBValue = packParamsBValue(this._shadowOffsetX, this._shadowOffsetY, flags);
+
+        if (!nextCache.fillColors
+            || nextCache.fillDefaultPacked !== fillDefaultPacked
+            || nextCache.fillUnderlinePacked !== fillUnderlinePacked
+            || nextCache.fillStrikethroughPacked !== fillStrikethroughPacked) {
+            nextCache.fillColors = createLayoutColorArray(layout, this._textColor, this._underlineColor, this._strikethroughColor);
+            nextCache.fillDefaultPacked = fillDefaultPacked;
+            nextCache.fillUnderlinePacked = fillUnderlinePacked;
+            nextCache.fillStrikethroughPacked = fillStrikethroughPacked;
+        }
+
+        if (!nextCache.outlineColors
+            || nextCache.outlineDefaultPacked !== outlineDefaultPacked
+            || nextCache.outlineUnderlinePacked !== outlineUnderlinePacked
+            || nextCache.outlineStrikethroughPacked !== outlineStrikethroughPacked) {
+            nextCache.outlineColors = createLayoutColorArray(layout, this._outlineColor, this._underlineColor, this._strikethroughColor);
+            nextCache.outlineDefaultPacked = outlineDefaultPacked;
+            nextCache.outlineUnderlinePacked = outlineUnderlinePacked;
+            nextCache.outlineStrikethroughPacked = outlineStrikethroughPacked;
+        }
+
+        if (!nextCache.glowColors || nextCache.glowPacked !== glowPacked) {
+            nextCache.glowColors = createVertexColorArray(this._glowColor, vertexCount);
+            nextCache.glowPacked = glowPacked;
+        }
+
+        if (!nextCache.shadowColors || nextCache.shadowPacked !== shadowPacked) {
+            nextCache.shadowColors = createVertexColorArray(this._shadowColor, vertexCount);
+            nextCache.shadowPacked = shadowPacked;
+        }
+
+        if (!nextCache.packedParamsA || nextCache.packedParamsAValue !== packedParamsAValue) {
+            nextCache.packedParamsA = createPackedParamsAArray(this._outlineWidth, this._glowSize, this._shadowBlur, vertexCount);
+            nextCache.packedParamsAValue = packedParamsAValue;
+        }
+
+        if (!nextCache.packedParamsB || nextCache.packedParamsBValue !== packedParamsBValue) {
+            nextCache.packedParamsB = createPackedParamsBArray(this._shadowOffsetX, this._shadowOffsetY, flags, vertexCount);
+            nextCache.packedParamsBValue = packedParamsBValue;
+        }
+
+        return {
+            fillColors: nextCache.fillColors,
+            outlineColors: nextCache.outlineColors,
+            glowColors: nextCache.glowColors,
+            shadowColors: nextCache.shadowColors,
+            packedParamsA: nextCache.packedParamsA,
+            packedParamsB: nextCache.packedParamsB
+        };
+    }
+
     private applyRenderState(drawBatches: MsdfDrawBatch[], layout: MsdfLayout = createEmptyLayout()): void {
         this._layout = layout;
         this._drawBatches = drawBatches;
@@ -1321,17 +1496,18 @@ export class MsdfTextSprite extends Laya.Sprite {
             this._shadowBlur,
             this._shadowColor
         );
+        const styleData = this.getPlainTextBatchStyleData(this._layout, vertexCount, flags);
 
         return [{
             vertices,
             uvs: this._layout.uvs,
             indices: this._layout.indices,
-            fillColors: createLayoutColorArray(this._layout, this._textColor, this._underlineColor, this._strikethroughColor),
-            outlineColors: createLayoutColorArray(this._layout, this._outlineColor, this._underlineColor, this._strikethroughColor),
-            glowColors: createVertexColorArray(this._glowColor, vertexCount),
-            shadowColors: createVertexColorArray(this._shadowColor, vertexCount),
-            packedParamsA: createPackedParamsAArray(this._outlineWidth, this._glowSize, this._shadowBlur, vertexCount),
-            packedParamsB: createPackedParamsBArray(this._shadowOffsetX, this._shadowOffsetY, flags, vertexCount)
+            fillColors: styleData.fillColors,
+            outlineColors: styleData.outlineColors,
+            glowColors: styleData.glowColors,
+            shadowColors: styleData.shadowColors,
+            packedParamsA: styleData.packedParamsA,
+            packedParamsB: styleData.packedParamsB
         }];
     }
 
@@ -1672,16 +1848,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             return;
         }
 
-        this._layout = this.font.buildLayout(
-            this._text,
-            this._fontSize,
-            this._letterSpacing,
-            this._lineSpacing,
-            {
-                underline: this._underline,
-                strikethrough: this._strikethrough
-            }
-        );
+        this._layout = this.getPlainTextLayout();
         const shrinkScale = this.resolveShrinkScale(this._layout.width, this._layout.height);
         this._contentWidth = this._layout.width * shrinkScale;
         this._contentHeight = this._layout.height * shrinkScale;
@@ -1709,6 +1876,8 @@ export class MsdfTextSprite extends Laya.Sprite {
         this.clampScroll();
         const contentBoxWidth = this._layoutWidth > 0 ? this._layoutWidth : this._contentWidth;
         const drawBatches: MsdfDrawBatch[] = [];
+        // 富文本里同样的“文本片段 + 样式”组合可能重复出现。
+        // 先缓存每个 run 的布局，再把可合并的 run 拼成更大的 GPU batch。
         const layoutCache = new WeakMap<MsdfRichTextStyle, Map<string, MsdfLayout>>();
         let pendingGroup: MsdfDrawBatchGroup | null = null;
 
@@ -1776,16 +1945,16 @@ export class MsdfTextSprite extends Laya.Sprite {
             this.graphics.clipRect(this._viewFrame.clipRectX, this._viewFrame.clipRectY, clipWidth, clipHeight);
         }
 
+        // 顶点始终保持在本地文本坐标里，真正的视口偏移在这里通过 x/y 参数施加。
         const drawOffsetX = this._viewFrame.drawOffsetX;
         const drawOffsetY = this._viewFrame.drawOffsetY;
-        const hasDrawOffset = drawOffsetX !== 0 || drawOffsetY !== 0;
 
         for (const batch of this._drawBatches) {
             this.graphics.drawTrianglesMSDF(
                 this.font.texture,
-                0,
-                0,
-                hasDrawOffset ? scaleVertices(batch.vertices, 1, drawOffsetX, drawOffsetY) : batch.vertices,
+                drawOffsetX,
+                drawOffsetY,
+                batch.vertices,
                 batch.uvs,
                 batch.indices,
                 batch.fillColors,
@@ -1813,6 +1982,8 @@ export class MsdfTextSprite extends Laya.Sprite {
     }
 
     private layoutRuns(): MsdfRichTextLine[] {
+        // 富文本会先变成链表形式的中间结构（line -> cmd -> cmd ...），
+        // 这样在换行、拆分、ellipsis 裁剪时成本更低，最后再展开成顶点数据。
         const lines: MsdfRichTextLine[] = [];
         const wordWrap = this._wordWrapWidth > 0;
         const noBreakWord = wordWrap;
@@ -1835,6 +2006,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         };
 
         const rebuildLine = (line: MsdfRichTextLine, segments: Array<{ text: string; style: MsdfRichTextStyle; }>, fallbackHeight: number): void => {
+            // 在 ellipsis 或重排后，用新的 segments 重新搭建这一行的命令链。
             let width = 0;
             let prev: MsdfRichTextCommand | null = null;
 
@@ -1874,6 +2046,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         };
 
         const addCmd = (text: string, style: MsdfRichTextStyle, metrics?: { width: number; height: number; }): void => {
+            // cmd 是富文本排版阶段的中间结构，后续才会展开成真正提交给 GPU 的顶点数据。
             if (!text) {
                 return;
             }
@@ -1911,6 +2084,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         };
 
         const addLine = (last: boolean = false): MsdfRichTextLine | null => {
+            // 结束当前行并推进到下一行。last=true 表示只做收尾，不再创建新行。
             lineX = 0;
 
             if (currentLine) {
@@ -1929,6 +2103,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         };
 
         const splitCmd = (cmd: MsdfRichTextCommand, pos: number): boolean => {
+            // 把一个命令从中间切开，常用于把过长的单词或片段拆到下一行。
             const code = cmd.text.charCodeAt(pos);
             if (isLowSurrogate(code)) {
                 pos--;
@@ -1962,6 +2137,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         };
 
         const moveCmds = (cmd: MsdfRichTextCommand | null): void => {
+            // 从某个命令开始，把后续命令整体迁移到当前行，避免重新创建和重新测量。
             if (!cmd || !currentLine) {
                 return;
             }
@@ -1992,6 +2168,9 @@ export class MsdfTextSprite extends Laya.Sprite {
         };
 
         const wrapText = (text: string, style: MsdfRichTextStyle): void => {
+            // 换行策略分两步：
+            // 1. 先按字符试探这一段还能在本行放下多少；
+            // 2. 再尽量回退到词边界，避免把英文/数字单词硬拆开。
             let remainWidth = Math.max(0, rectWidth - lineX);
             const styleMetrics = this.getRichTextRenderMetrics(style, metricCache);
             const totalMetrics = this.getRichTextMetrics(text, style, metricCache);
@@ -2032,6 +2211,7 @@ export class MsdfTextSprite extends Laya.Sprite {
                 wordWidth -= charWidth;
 
                 if (noBreakWord && ((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || (isPunctuation = punctuationChars.has(code)))) {
+                    // 对英文、数字和标点做额外边界处理，让“词”尽量保持完整。
                     const wordBoundary = part.length > 0 ? ((match = wordBoundaryTest.exec(part)) ? match.index : null) : 0;
                     if (wordBoundary > 0) {
                         if (wordBoundary > part.length - maxWordLength) {
@@ -2045,6 +2225,7 @@ export class MsdfTextSprite extends Laya.Sprite {
                         let totalLen = part.length;
                         let newLine = false;
 
+                        // 当前 run 放不下时，回溯当前行里已有的命令，尝试把整词一起挪到下一行。
                         while (cmd) {
                             if (cmd.width > 0) {
                                 match = wordBoundaryTest.exec(cmd.text);
@@ -2153,6 +2334,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
 
         addLine(true);
+        // 先完成正常排版，再统一做 ellipsis 裁剪，这样可以复用已有的测量和重建逻辑。
         this.applyEllipsisToRichTextLines(
             lines,
             rectWidth,
@@ -2179,6 +2361,7 @@ export class MsdfTextSprite extends Laya.Sprite {
 
         let layout = styleLayouts?.get(cmd.text);
         if (!layout) {
+            // 每个富文本 run 依然复用纯文本的 buildLayout，只是输入样式来自当前 run。
             layout = this.font.buildLayout(
                 cmd.text,
                 style.fontSize,
@@ -2196,6 +2379,8 @@ export class MsdfTextSprite extends Laya.Sprite {
             return null;
         }
 
+        // run 级别的形变都在这里完成：bold 拉宽 X，italic 按 Y 倾斜，
+        // shrink 统一缩放，x/y 再把这个 run 放到最终行盒中的目标位置。
         const baseHeight = Math.max(layout.height, this.font.getLineHeight(style.fontSize));
         const italicOffset = styleSkewExtra(baseHeight, style) * shrinkScale;
         const scaleX = styleScaleX(style);
@@ -2213,6 +2398,8 @@ export class MsdfTextSprite extends Laya.Sprite {
             this._shadowColor
         );
 
+        // 把 run 的局部布局映射到最终顶点：
+        // 先应用 bold/italic/shrink，再叠加行内位置偏移。
         for (let i = 0; i < layout.vertices.length; i += 2) {
             const localX = layout.vertices[i] * scaleX * shrinkScale;
             const localY = layout.vertices[i + 1] * shrinkScale;
