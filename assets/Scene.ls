@@ -16,7 +16,24 @@
     },
     {
       "_$type": "6030e92e-330a-4b12-a247-a190f3a3f814",
+      "enabled": false,
       "scriptPath": "../src/TestOverflow.ts"
+    }
+  ],
+  "_$child": [
+    {
+      "_$id": "y66t5w2r",
+      "_$type": "Label",
+      "name": "Label",
+      "x": 11,
+      "y": 7,
+      "width": 120,
+      "height": 28,
+      "text": "Label",
+      "fontSize": 25,
+      "color": "#FFFFFF",
+      "valign": "top",
+      "padding": "0,0,0,0"
     }
   ]
 }

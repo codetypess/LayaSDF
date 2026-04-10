@@ -2,6 +2,8 @@ import { MsdfBitmapFont, MsdfOverflow, MsdfRichTextRun, MsdfRichTextStyle, MsdfT
 
 type Padding = [number, number, number, number];
 type MsdfLabelFitContent = "no" | "yes" | "height";
+type MsdfLabelRefreshKind = "text" | "layout";
+type MsdfTemplateVars = Record<string, unknown>;
 type MsdfFontResourceConfig = {
     textureUrl: string;
     jsonUrl: string;
@@ -16,6 +18,25 @@ type MsdfLabelContentBox = {
     y: number;
     width: number;
     height: number;
+};
+type MsdfLabelParsedText = {
+    text: string;
+    useHtml: boolean;
+};
+type MsdfLabelTextSpriteLayout = {
+    layoutWidth: number;
+    layoutHeight: number;
+    wrapWidth: number;
+};
+type MsdfLabelViewportFrame = {
+    width: number;
+    height: number;
+    drawOffsetX: number;
+    drawOffsetY: number;
+    clipRectX: number;
+    clipRectY: number;
+    clipRectWidth: number;
+    clipRectHeight: number;
 };
 const NORMALIZE_CR = /\r\n?/g;
 const ESCAPE_CHARS_PATTERN = /\\(\w)/g;
@@ -119,8 +140,8 @@ export class MsdfLabel extends Laya.UIComponent {
     private _fitContent: MsdfLabelFitContent = "no";
     private _fitFlag = false;
     private _ignoreLang = false;
-    private _templateVars: Record<string, any> | null = null;
-    private _htmlParseOptions: any = null;
+    private _templateVars: MsdfTemplateVars | null = null;
+    private _htmlParseOptions: Laya.HtmlParseOptions | null = null;
     private _parseEscapeChars = true;
 
     private _fontTextureUrl = "";
@@ -148,7 +169,7 @@ export class MsdfLabel extends Laya.UIComponent {
     }
 
     static preload(textureUrl: string, jsonUrl: string, shaderUrl: string): Promise<MsdfBitmapFont> {
-        const key = `${shaderUrl}|${textureUrl}|${jsonUrl}`;
+        const key = MsdfLabel.getFontResourceKey(textureUrl, jsonUrl, shaderUrl);
         let task = MsdfLabel.fontCache.get(key);
 
         if (!task) {
@@ -182,6 +203,14 @@ export class MsdfLabel extends Laya.UIComponent {
         return ESCAPE_SEQUENCE[word] ?? word;
     }
 
+    private static getFontResourceKey(textureUrl: string, jsonUrl: string, shaderUrl: string): string {
+        return `${shaderUrl}|${textureUrl}|${jsonUrl}`;
+    }
+
+    private scheduleRefresh(kind: MsdfLabelRefreshKind = "text"): void {
+        this.callLater(kind === "text" ? this.changeText : this.updateLayoutFrame);
+    }
+
     get text(): string {
         return this._text;
     }
@@ -197,7 +226,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._text = nextValue;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
         this.event(Laya.Event.CHANGE);
     }
 
@@ -210,7 +239,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._fontSize = value;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get letterSpacing(): number {
@@ -222,7 +251,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._letterSpacing = value;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get color(): string {
@@ -234,7 +263,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._color = value || "#ffffff";
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get align(): string {
@@ -246,7 +275,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._align = value || "left";
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get valign(): string {
@@ -258,7 +287,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._valign = value || "top";
-        this.callLater(this.updateLayoutFrame);
+        this.scheduleRefresh("layout");
     }
 
     get alignItems(): string {
@@ -271,7 +300,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._alignItems = next;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get leading(): number {
@@ -283,7 +312,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._leading = value;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get padding(): string {
@@ -296,7 +325,7 @@ export class MsdfLabel extends Laya.UIComponent {
         }
         this._padding = value || "0,0,0,0";
         this._paddingValues = parsePadding(this._padding);
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get stroke(): number {
@@ -308,7 +337,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._stroke = value;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get strokeColor(): string {
@@ -320,7 +349,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._strokeColor = value || "#000000";
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get glow(): number {
@@ -333,7 +362,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._glow = next;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get glowColor(): string {
@@ -345,7 +374,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._glowColor = value || "#ffffff";
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get shadowColor(): string {
@@ -357,7 +386,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._shadowColor = value || "#000000";
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get shadowBlur(): number {
@@ -370,7 +399,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._shadowBlur = next;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get shadowOffsetX(): number {
@@ -382,7 +411,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._shadowOffsetX = value || 0;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get shadowOffsetY(): number {
@@ -394,7 +423,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._shadowOffsetY = value || 0;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get bgColor(): string {
@@ -406,7 +435,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._bgColor = value || "";
-        this.callLater(this.updateLayoutFrame);
+        this.scheduleRefresh("layout");
     }
 
     get borderColor(): string {
@@ -418,7 +447,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._borderColor = value || "";
-        this.callLater(this.updateLayoutFrame);
+        this.scheduleRefresh("layout");
     }
 
     get wordWrap(): boolean {
@@ -430,7 +459,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._wordWrap = value;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get bold(): boolean {
@@ -443,7 +472,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._bold = next;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get italic(): boolean {
@@ -456,7 +485,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._italic = next;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get underline(): boolean {
@@ -469,7 +498,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._underline = next;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get underlineColor(): string {
@@ -481,7 +510,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._underlineColor = value || "";
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get strikethrough(): boolean {
@@ -494,7 +523,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._strikethrough = next;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get strikethroughColor(): string {
@@ -506,7 +535,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._strikethroughColor = value || "";
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get html(): boolean {
@@ -519,7 +548,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._html = next;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get ubb(): boolean {
@@ -532,7 +561,7 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._ubb = next;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get font(): string {
@@ -570,7 +599,7 @@ export class MsdfLabel extends Laya.UIComponent {
         }
 
         this._maxWidth = next;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get overflow(): MsdfOverflow {
@@ -584,7 +613,7 @@ export class MsdfLabel extends Laya.UIComponent {
         }
 
         this._overflow = next;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get fitContent(): MsdfLabelFitContent {
@@ -600,7 +629,7 @@ export class MsdfLabel extends Laya.UIComponent {
         }
 
         this._fitContent = next;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     get textField(): MsdfTextSprite {
@@ -621,11 +650,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.text = this._text;
     }
 
-    get templateVars(): Record<string, any> | null {
+    get templateVars(): MsdfTemplateVars | null {
         return this._templateVars;
     }
 
-    set templateVars(value: Record<string, any> | boolean | null) {
+    set templateVars(value: MsdfTemplateVars | boolean | null) {
         if (!this._templateVars && !value) {
             return;
         }
@@ -638,14 +667,14 @@ export class MsdfLabel extends Laya.UIComponent {
             this._templateVars = value;
         }
 
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
-    get htmlParseOptions(): any {
+    get htmlParseOptions(): Laya.HtmlParseOptions | null {
         return this._htmlParseOptions;
     }
 
-    set htmlParseOptions(value: any) {
+    set htmlParseOptions(value: Laya.HtmlParseOptions | null) {
         this._htmlParseOptions = value;
     }
 
@@ -658,8 +687,7 @@ export class MsdfLabel extends Laya.UIComponent {
     }
 
     set scrollX(value: number) {
-        this._textSprite.scrollX = value || 0;
-        this.updateLayoutFrame();
+        this.updateScrollOffset("x", value);
     }
 
     get scrollY(): number {
@@ -667,8 +695,7 @@ export class MsdfLabel extends Laya.UIComponent {
     }
 
     set scrollY(value: number) {
-        this._textSprite.scrollY = value || 0;
-        this.updateLayoutFrame();
+        this.updateScrollOffset("y", value);
     }
 
     get maxScrollX(): number {
@@ -754,7 +781,7 @@ export class MsdfLabel extends Laya.UIComponent {
 
     protected _sizeChanged(): void {
         super._sizeChanged();
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
     }
 
     set_width(value: number): void {
@@ -775,7 +802,7 @@ export class MsdfLabel extends Laya.UIComponent {
         super.set_height(value);
     }
 
-    set_dataSource(value: any): void {
+    set_dataSource(value: unknown): void {
         this._dataSource = value;
         if (typeof value === "number" || typeof value === "string") {
             this.text = `${value}`;
@@ -807,13 +834,17 @@ export class MsdfLabel extends Laya.UIComponent {
         return null;
     }
 
-    setVar(name: string, value: any): MsdfLabel {
+    setVar(name: string, value: unknown): MsdfLabel {
         if (!this._templateVars) {
             this._templateVars = {};
         }
         this._templateVars[name] = value;
-        this.callLater(this.changeText);
+        this.scheduleRefresh();
         return this;
+    }
+
+    private appendTemplateValue(result: string, value: unknown): string {
+        return result + (value as string | number | boolean | bigint | object | null | undefined);
     }
 
     private parseTemplate(template: string): string {
@@ -851,11 +882,11 @@ export class MsdfLabel extends Laya.UIComponent {
             pos3 = tag.indexOf("=");
             if (pos3 !== -1) {
                 const value = this._templateVars[tag.substring(0, pos3)];
-                result += value == null ? tag.substring(pos3 + 1) : value;
+                result = value == null ? result + tag.substring(pos3 + 1) : this.appendTemplateValue(result, value);
             } else {
                 const value = this._templateVars[tag];
                 if (value != null) {
-                    result += value;
+                    result = this.appendTemplateValue(result, value);
                 }
             }
 
@@ -896,16 +927,38 @@ export class MsdfLabel extends Laya.UIComponent {
         this._textSprite.size(0, 0);
     }
 
+    private clearFontState(): void {
+        this._resourceKey = "";
+        this._font = null;
+    }
+
+    private applyLoadedFont(font: MsdfBitmapFont): void {
+        this._font = font;
+        this._textSprite.resetFont(font);
+        this._textSprite.visible = true;
+        this.changeText();
+        this.event(Laya.Event.LOADED);
+    }
+
+    private updateScrollOffset(axis: "x" | "y", value: number): void {
+        if (axis === "x") {
+            this._textSprite.scrollX = value || 0;
+        } else {
+            this._textSprite.scrollY = value || 0;
+        }
+
+        this.updateLayoutFrame();
+    }
+
     private reloadFont(): void {
         if (!this.hasCompleteFontResources()) {
-            this._resourceKey = "";
-            this._font = null;
+            this.clearFontState();
             this.clearTextSprite();
             this.drawBackground(this.width, this.height);
             return;
         }
 
-        const nextKey = `${this._fontShaderUrl}|${this._fontTextureUrl}|${this._fontJsonUrl}`;
+        const nextKey = MsdfLabel.getFontResourceKey(this._fontTextureUrl, this._fontJsonUrl, this._fontShaderUrl);
         this._resourceKey = nextKey;
         this._font = null;
 
@@ -914,12 +967,7 @@ export class MsdfLabel extends Laya.UIComponent {
                 return;
             }
 
-            this._font = font;
-
-            this._textSprite.resetFont(font);
-            this._textSprite.visible = true;
-            this.changeText();
-            this.event(Laya.Event.LOADED);
+            this.applyLoadedFont(font);
         }).catch(error => {
             console.error("[MsdfLabel] failed to load font resources", error);
         });
@@ -948,9 +996,8 @@ export class MsdfLabel extends Laya.UIComponent {
         };
     }
 
-    private createBaseTextStyle(): any {
-        const TextStyleCtor = (Laya as any).TextStyle;
-        const style = TextStyleCtor ? new TextStyleCtor() : {};
+    private createBaseTextStyle(): Laya.TextStyle {
+        const style = new Laya.TextStyle();
 
         style.fontSize = this._fontSize;
         style.color = this._color;
@@ -970,7 +1017,7 @@ export class MsdfLabel extends Laya.UIComponent {
         return style;
     }
 
-    private toRichTextStyle(style: any): MsdfRichTextStyle {
+    private toRichTextStyle(style: Laya.TextStyle | null | undefined): MsdfRichTextStyle {
         const textColorCss = normalizeColor(style?.color, this._color);
         const underlineColorCss = style?.underlineColor || null;
         const strikethroughColorCss = style?.strikethroughColor || null;
@@ -1014,9 +1061,7 @@ export class MsdfLabel extends Laya.UIComponent {
         runs.push({ text, style });
     }
 
-    private buildTextRuns(): MsdfRichTextRun[] {
-        // MsdfLabel 负责把原始文本解析成带样式的 runs，
-        // MsdfTextSprite 只接收已经解析完成的 runs 和布局约束。
+    private normalizeSourceText(): string {
         let sourceText = this._text.replace(NORMALIZE_CR, "\n");
         if (this._parseEscapeChars) {
             sourceText = sourceText.replace(ESCAPE_CHARS_PATTERN, MsdfLabel.replaceEscapeChar);
@@ -1024,36 +1069,35 @@ export class MsdfLabel extends Laya.UIComponent {
         if (this._templateVars) {
             sourceText = this.parseTemplate(sourceText);
         }
-        const baseStyle = this.createBaseTextStyle();
-        const runs: MsdfRichTextRun[] = [];
+        return sourceText;
+    }
 
+    private resolveParsedText(sourceText: string): MsdfLabelParsedText {
         let parsedText = sourceText;
         let useHtml = this._html;
 
         if (this._ubb) {
-            const ubbParser = (Laya as any).UBBParser?.defaultParser;
+            const ubbParser = Laya.UBBParser?.defaultParser;
             if (ubbParser) {
                 parsedText = ubbParser.parse(parsedText);
                 useHtml = true;
             }
         }
 
-        if (!useHtml) {
-            this.appendRichTextRun(runs, parsedText, this.toRichTextStyle(baseStyle));
-            return runs;
-        }
+        return { text: parsedText, useHtml };
+    }
 
-        const htmlParser = (Laya as any).HtmlParser?.defaultParser;
-        const htmlElementType = (Laya as any).HtmlElementType;
-        const htmlElement = (Laya as any).HtmlElement;
+    private appendHtmlRuns(runs: MsdfRichTextRun[], text: string, baseStyle: Laya.TextStyle): boolean {
+        const htmlParser = Laya.HtmlParser?.defaultParser;
+        const htmlElementType = Laya.HtmlElementType;
+        const htmlElement = Laya.HtmlElement;
 
         if (!htmlParser || !htmlElementType) {
-            this.appendRichTextRun(runs, parsedText, this.toRichTextStyle(baseStyle));
-            return runs;
+            return false;
         }
 
-        const elements: any[] = [];
-        htmlParser.parse(parsedText, baseStyle, elements, this._htmlParseOptions);
+        const elements: Laya.HtmlElement[] = [];
+        htmlParser.parse(text, baseStyle, elements, this._htmlParseOptions);
 
         for (const element of elements) {
             if (element.type !== htmlElementType.Text || !element.text) {
@@ -1065,6 +1109,27 @@ export class MsdfLabel extends Laya.UIComponent {
 
         if (htmlElement?.returnToPool) {
             htmlElement.returnToPool(elements);
+        }
+
+        return true;
+    }
+
+    private buildTextRuns(): MsdfRichTextRun[] {
+        // MsdfLabel 负责把原始文本解析成带样式的 runs，
+        // MsdfTextSprite 只接收已经解析完成的 runs 和布局约束。
+        const sourceText = this.normalizeSourceText();
+        const baseStyle = this.createBaseTextStyle();
+        const runs: MsdfRichTextRun[] = [];
+        const parsed = this.resolveParsedText(sourceText);
+
+        if (!parsed.useHtml) {
+            this.appendRichTextRun(runs, parsed.text, this.toRichTextStyle(baseStyle));
+            return runs;
+        }
+
+        if (!this.appendHtmlRuns(runs, parsed.text, baseStyle)) {
+            this.appendRichTextRun(runs, parsed.text, this.toRichTextStyle(baseStyle));
+            return runs;
         }
 
         return runs;
@@ -1096,21 +1161,7 @@ export class MsdfLabel extends Laya.UIComponent {
         ];
     }
 
-    changeText(text?: string): void {
-        if (typeof text === "string") {
-            this.text = text;
-            return;
-        }
-
-        if (!this._font) {
-            return;
-        }
-
-        const runs = this.buildTextRuns();
-        this._maxOutlineWidth = this.getMaxOutlineWidth(runs);
-        const effectInsets = this.getEffectInsets(this._maxOutlineWidth);
-        // 真正参与排版的是扣掉 padding 和效果外扩后的内容区。
-        // glow/shadow/outline 虽然是视觉效果，但它们会占用标签的可用排版空间。
+    private resolveTextSpriteLayout(effectInsets: Padding): MsdfLabelTextSpriteLayout {
         const explicitContentBox = this.getContentBox({ width: this.width, height: this.height }, effectInsets);
         const availableWidth = this._hasExplicitWidth ? explicitContentBox.width : Number.MAX_VALUE;
         const availableHeight = this._hasExplicitHeight ? explicitContentBox.height : 0;
@@ -1123,9 +1174,17 @@ export class MsdfLabel extends Laya.UIComponent {
             ? widthLimit
             : 0;
 
-        this._textSprite.layoutWidth = this._hasExplicitWidth ? Math.max(availableWidth, 0) : -1;
-        this._textSprite.layoutHeight = this._hasExplicitHeight ? availableHeight : -1;
-        this._textSprite.wordWrapWidth = wrapWidth;
+        return {
+            layoutWidth: this._hasExplicitWidth ? Math.max(availableWidth, 0) : -1,
+            layoutHeight: this._hasExplicitHeight ? availableHeight : -1,
+            wrapWidth
+        };
+    }
+
+    private applyTextSpriteLayout(runs: MsdfRichTextRun[], layout: MsdfLabelTextSpriteLayout): void {
+        this._textSprite.layoutWidth = layout.layoutWidth;
+        this._textSprite.layoutHeight = layout.layoutHeight;
+        this._textSprite.wordWrapWidth = layout.wrapWidth;
         this._textSprite.letterSpacing = this._letterSpacing;
         this._textSprite.lineSpacing = this._leading;
         this._textSprite.defaultAlign = this._align;
@@ -1139,6 +1198,92 @@ export class MsdfLabel extends Laya.UIComponent {
             this._shadowBlur
         );
         this._textSprite.setRuns(runs);
+    }
+
+    private resolveValignOffset(contentBoxHeight: number): number {
+        if (this._valign === "middle") {
+            return Math.max((contentBoxHeight - this._textSprite.contentHeight) * 0.5, 0);
+        }
+
+        if (this._valign === "bottom") {
+            return Math.max(contentBoxHeight - this._textSprite.contentHeight, 0);
+        }
+
+        return 0;
+    }
+
+    private applyFitContentSize(measuredSize: MsdfLabelSize): void {
+        if (this._fitFlag || (this._fitContent !== "yes" && this._fitContent !== "height")) {
+            return;
+        }
+
+        this._fitFlag = true;
+        if (this._fitContent === "height") {
+            this.set_height(measuredSize.height);
+        } else {
+            this.set_width(measuredSize.width);
+            this.set_height(measuredSize.height);
+        }
+        this._fitFlag = false;
+    }
+
+    private getViewportContentBox(layoutSize: MsdfLabelSize, effectInsets: Padding): MsdfLabelContentBox {
+        const contentBox = this.getContentBox(layoutSize, effectInsets);
+        if (this._hasExplicitHeight) {
+            return contentBox;
+        }
+
+        return {
+            ...contentBox,
+            height: this._textSprite.contentHeight
+        };
+    }
+
+    private resolveViewportFrame(layoutSize: MsdfLabelSize, contentBox: MsdfLabelContentBox): MsdfLabelViewportFrame {
+        return {
+            width: layoutSize.width,
+            height: layoutSize.height,
+            drawOffsetX: contentBox.x,
+            drawOffsetY: contentBox.y + this.resolveValignOffset(contentBox.height),
+            clipRectX: 0,
+            clipRectY: 0,
+            clipRectWidth: layoutSize.width,
+            clipRectHeight: layoutSize.height
+        };
+    }
+
+    private applyViewportFrame(frame: MsdfLabelViewportFrame): void {
+        this._textSprite.pos(0, 0);
+        this._textSprite.setViewportFrame(
+            frame.width,
+            frame.height,
+            frame.drawOffsetX,
+            frame.drawOffsetY,
+            frame.clipRectX,
+            frame.clipRectY,
+            frame.clipRectWidth,
+            frame.clipRectHeight
+        );
+    }
+
+    changeText(text?: string): void {
+        if (typeof text === "string") {
+            this.text = text;
+            return;
+        }
+
+        if (!this._font) {
+            return;
+        }
+
+        const runs = this.buildTextRuns();
+        this._maxOutlineWidth = this.getMaxOutlineWidth(runs);
+        const effectInsets = this.getEffectInsets(this._maxOutlineWidth);
+        const textSpriteLayout = this.resolveTextSpriteLayout(effectInsets);
+
+        // 真正参与排版的是扣掉 padding 和效果外扩后的内容区。
+        // glow/shadow/outline 虽然是视觉效果，但它们会占用标签的可用排版空间。
+        this.applyTextSpriteLayout(runs, textSpriteLayout);
         this._textSprite.refresh();
         this.updateLayoutFrame();
     }
@@ -1146,42 +1291,12 @@ export class MsdfLabel extends Laya.UIComponent {
     private updateLayoutFrame(): void {
         const effectInsets = this.getEffectInsets();
         const measuredSize = this.getMeasuredLabelSize(effectInsets);
-
-        if (!this._fitFlag && (this._fitContent === "yes" || this._fitContent === "height")) {
-            this._fitFlag = true;
-            if (this._fitContent === "height") {
-                this.set_height(measuredSize.height);
-            } else {
-                this.set_width(measuredSize.width);
-                this.set_height(measuredSize.height);
-            }
-            this._fitFlag = false;
-        }
-
+        this.applyFitContentSize(measuredSize);
         const layoutSize = this.getLayoutSize(measuredSize);
-        const contentBox = this._hasExplicitHeight
-            ? this.getContentBox(layoutSize, effectInsets)
-            : { ...this.getContentBox(layoutSize, effectInsets), height: this._textSprite.contentHeight };
+        const contentBox = this.getViewportContentBox(layoutSize, effectInsets);
+        const viewportFrame = this.resolveViewportFrame(layoutSize, contentBox);
 
-        // MsdfTextSprite 始终从 (0, 0) 画起，Label 的对齐结果通过视口偏移表达。
-        let y = contentBox.y;
-        if (this._valign === "middle") {
-            y += Math.max((contentBox.height - this._textSprite.contentHeight) * 0.5, 0);
-        } else if (this._valign === "bottom") {
-            y += Math.max(contentBox.height - this._textSprite.contentHeight, 0);
-        }
-
-        this._textSprite.pos(0, 0);
-        this._textSprite.setViewportFrame(
-            layoutSize.width,
-            layoutSize.height,
-            contentBox.x,
-            y,
-            0,
-            0,
-            layoutSize.width,
-            layoutSize.height
-        );
+        this.applyViewportFrame(viewportFrame);
         this.drawBackground(layoutSize.width, layoutSize.height);
         this.repaint();
     }

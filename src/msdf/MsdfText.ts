@@ -57,6 +57,8 @@ type MsdfDrawBatch = {
     packedParamsB: Uint32Array;
 };
 
+type MsdfBatchStyleData = Omit<MsdfDrawBatch, "vertices" | "uvs" | "indices">;
+
 type MsdfViewFrame = {
     // 来自 MsdfLabel 的视口信息。文本几何本身仍然保持在本地坐标里。
     width: number;
@@ -213,6 +215,60 @@ type MsdfRichTextLineSegment = {
     style: MsdfRichTextStyle;
     width: number;
     height: number;
+};
+
+type MsdfRichTextLayoutState = {
+    lines: MsdfRichTextLine[];
+    rectWidth: number;
+    rectHeight: number;
+    metricCache: MsdfRichTextMetricCache;
+    lineX: number;
+    lineY: number;
+    lastHeight: number;
+    currentLine: MsdfRichTextLine | null;
+    lastCmd: MsdfRichTextCommand | null;
+};
+
+type MsdfRichTextWrapCharInfo = {
+    text: string;
+    code: number;
+    width: number;
+};
+
+type MsdfRichTextWrapAdjustment = {
+    index: number;
+    part: string;
+    wordWidth: number;
+    charWidth: number | null;
+    remainWidth: number;
+    continueLoop: boolean;
+};
+
+type MsdfRichTextWrapAdvance = {
+    index: number;
+    startIndex: number;
+    remainWidth: number;
+    wordWidth: number;
+};
+
+type MsdfRichTextShrinkCandidate = {
+    lines: MsdfRichTextLine[];
+    contentWidth: number;
+    contentHeight: number;
+    widthScale: number;
+    heightScale: number;
+    scale: number;
+    fillScore: number;
+};
+
+type MsdfRichTextLayoutCache = WeakMap<MsdfRichTextStyle, Map<string, MsdfLayout>>;
+
+type MsdfTextRefreshResult = {
+    contentWidth: number;
+    contentHeight: number;
+    lines: MsdfTextLineMetric[];
+    drawBatches: MsdfDrawBatch[];
+    layout?: MsdfLayout;
 };
 
 const DEFAULT_TEXT_COLOR = new Laya.Vector4(1, 1, 1, 1);
@@ -579,11 +635,11 @@ function kerningKey(first: number, second: number): number {
     return first * KERNING_KEY_MULTIPLIER + second;
 }
 
-function normalizeFontJson(raw: any): MsdfFontJson {
+function normalizeFontJson(raw: unknown): MsdfFontJson {
     let data = raw;
 
     if (data && typeof data === "object" && "data" in data) {
-        data = data.data;
+        data = (data as { data: unknown; }).data;
     }
 
     if (typeof data === "string") {
@@ -609,7 +665,7 @@ export class MsdfBitmapFont {
     private _renderState: MsdfFontRenderState | null = null;
     private _missingDecorationGlyphReported = false;
 
-    static fromResources(texture: Laya.Texture, rawData: any): MsdfBitmapFont {
+    static fromResources(texture: Laya.Texture, rawData: unknown): MsdfBitmapFont {
         return new MsdfBitmapFont(texture, normalizeFontJson(rawData));
     }
 
@@ -656,7 +712,7 @@ export class MsdfBitmapFont {
     }
 
     createText(options: MsdfTextOptions): MsdfTextSprite {
-        return new MsdfTextSprite(this, options);
+        return MsdfTextSprite.create(this, options);
     }
 
     getLineHeight(fontSize: number): number {
@@ -947,25 +1003,32 @@ export class MsdfBitmapFont {
 }
 
 export class MsdfTextSprite extends Laya.Sprite {
+    static create(font: MsdfBitmapFont, options: MsdfTextOptions = {}): MsdfTextSprite {
+        const sprite = new MsdfTextSprite();
+        sprite.initialize(font, options);
+        return sprite;
+    }
+
+    private font: MsdfBitmapFont | null = null;
     private materialInstance: Laya.Material;
 
-    private _text: string;
-    private _fontSize: number;
-    private _letterSpacing: number;
-    private _lineSpacing: number;
-    private _textColor: Laya.Vector4;
-    private _underlineColor: Laya.Vector4 | null;
-    private _strikethroughColor: Laya.Vector4 | null;
-    private _outlineColor: Laya.Vector4;
-    private _outlineWidth: number;
-    private _glowColor: Laya.Vector4;
-    private _glowSize: number;
-    private _shadowColor: Laya.Vector4;
-    private _shadowOffsetX: number;
-    private _shadowOffsetY: number;
-    private _shadowBlur: number;
-    private _underline: boolean;
-    private _strikethrough: boolean;
+    private _text = "";
+    private _fontSize = 16;
+    private _letterSpacing = 0;
+    private _lineSpacing = 0;
+    private _textColor = DEFAULT_TEXT_COLOR.clone();
+    private _underlineColor: Laya.Vector4 | null = null;
+    private _strikethroughColor: Laya.Vector4 | null = null;
+    private _outlineColor = DEFAULT_OUTLINE_COLOR.clone();
+    private _outlineWidth = 0;
+    private _glowColor = DEFAULT_GLOW_COLOR.clone();
+    private _glowSize = 0;
+    private _shadowColor = DEFAULT_SHADOW_COLOR.clone();
+    private _shadowOffsetX = 0;
+    private _shadowOffsetY = 0;
+    private _shadowBlur = 0;
+    private _underline = false;
+    private _strikethrough = false;
     private _layout: MsdfLayout = createEmptyLayout();
     private _runs: MsdfRichTextRun[] = [];
     private _usesRuns = false;
@@ -994,9 +1057,18 @@ export class MsdfTextSprite extends Laya.Sprite {
     private _plainTextLayoutDirty = true;
     private _plainTextBatchCache: MsdfPlainTextBatchCache = createEmptyPlainTextBatchCache();
 
-    constructor(private font: MsdfBitmapFont | null = null, options: MsdfTextOptions = {}) {
+    constructor() {
         super();
+        this.materialInstance = new Laya.Material();
+        this.material = this.materialInstance;
+        this.mouseThrough = true;
 
+        this.syncMaterial();
+        this.refresh();
+    }
+
+    private initialize(font: MsdfBitmapFont | null, options: MsdfTextOptions = {}): void {
+        this.font = font;
         this._text = options.text ?? "";
         this._fontSize = options.fontSize ?? font?.lineHeight ?? 16;
         this._letterSpacing = options.letterSpacing ?? 0;
@@ -1014,10 +1086,12 @@ export class MsdfTextSprite extends Laya.Sprite {
         this._shadowBlur = options.shadowBlur ?? 0;
         this._underline = !!options.underline;
         this._strikethrough = !!options.strikethrough;
+        this._usesRuns = false;
+        this._runs = [];
+        this._plainTextLayoutDirty = true;
+        this.invalidatePlainTextBatchCache();
         this.materialInstance = this.font?.renderState.material ?? new Laya.Material();
         this.material = this.materialInstance;
-        this.mouseThrough = true;
-
         this.syncMaterial();
         this.refresh();
     }
@@ -1033,8 +1107,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         this._text = value ?? "";
         this._usesRuns = false;
         this._runs = [];
-        this._plainTextLayoutDirty = true;
-        this.refresh();
+        this.refreshAfterPlainTextLayoutChange();
     }
 
     set fontSize(value: number) {
@@ -1042,8 +1115,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             return;
         }
         this._fontSize = value;
-        this._plainTextLayoutDirty = true;
-        this.refresh();
+        this.refreshAfterPlainTextLayoutChange();
     }
 
     set letterSpacing(value: number) {
@@ -1051,8 +1123,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             return;
         }
         this._letterSpacing = value;
-        this._plainTextLayoutDirty = true;
-        this.refresh();
+        this.refreshAfterPlainTextLayoutChange();
     }
 
     set lineSpacing(value: number) {
@@ -1060,8 +1131,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             return;
         }
         this._lineSpacing = value;
-        this._plainTextLayoutDirty = true;
-        this.refresh();
+        this.refreshAfterPlainTextLayoutChange();
     }
 
     get wordWrapWidth(): number {
@@ -1129,15 +1199,7 @@ export class MsdfTextSprite extends Laya.Sprite {
     }
 
     set scrollX(value: number) {
-        const next = this.font
-            ? Math.min(Math.max(value || 0, 0), this.maxScrollX)
-            : Math.max(value || 0, 0);
-        if (this._scrollX === next) {
-            return;
-        }
-
-        this._scrollX = next;
-        this.refresh();
+        this.updateScrollValue("x", value);
     }
 
     get scrollY(): number {
@@ -1145,15 +1207,7 @@ export class MsdfTextSprite extends Laya.Sprite {
     }
 
     set scrollY(value: number) {
-        const next = this.font
-            ? Math.min(Math.max(value || 0, 0), this.maxScrollY)
-            : Math.max(value || 0, 0);
-        if (this._scrollY === next) {
-            return;
-        }
-
-        this._scrollY = next;
-        this.refresh();
+        this.updateScrollValue("y", value);
     }
 
     get maxScrollX(): number {
@@ -1168,60 +1222,43 @@ export class MsdfTextSprite extends Laya.Sprite {
 
     set textColor(value: Laya.Vector4) {
         this._textColor = value;
-        if (!this._usesRuns) {
-            this.invalidatePlainTextBatchCache();
-            this.refresh();
-        }
+        this.refreshAfterPlainTextStyleChange();
     }
 
     set underlineColor(value: Laya.Vector4 | null) {
         this._underlineColor = value;
-        if (!this._usesRuns) {
-            this.invalidatePlainTextBatchCache();
-            this.refresh();
-        }
+        this.refreshAfterPlainTextStyleChange();
     }
 
     set strikethroughColor(value: Laya.Vector4 | null) {
         this._strikethroughColor = value;
-        if (!this._usesRuns) {
-            this.invalidatePlainTextBatchCache();
-            this.refresh();
-        }
+        this.refreshAfterPlainTextStyleChange();
     }
 
     set outlineColor(value: Laya.Vector4) {
         this._outlineColor = value;
-        if (!this._usesRuns) {
-            this.invalidatePlainTextBatchCache();
-            this.refresh();
-        }
+        this.refreshAfterPlainTextStyleChange();
     }
 
     set outlineWidth(value: number) {
         this._outlineWidth = value;
-        if (!this._usesRuns) {
-            this.invalidatePlainTextBatchCache();
-            this.refresh();
-        }
+        this.refreshAfterPlainTextStyleChange();
     }
 
     set glowColor(value: Laya.Vector4) {
         this._glowColor = value;
-        this.invalidatePlainTextBatchCache();
-        this.refresh();
+        this.refreshAfterEffectChange();
     }
 
     set glowSize(value: number) {
         this._glowSize = Math.max(0, value);
-        this.invalidatePlainTextBatchCache();
-        this.refresh();
+        this.refreshAfterEffectChange();
     }
 
     setGlowStyle(color: Laya.Vector4, size: number): void {
         this._glowColor = color;
         this._glowSize = Math.max(0, size);
-        this.invalidatePlainTextBatchCache();
+        this.refreshAfterEffectChange(false);
     }
 
     setShadowStyle(color: Laya.Vector4, offsetX: number, offsetY: number, blur: number): void {
@@ -1229,20 +1266,20 @@ export class MsdfTextSprite extends Laya.Sprite {
         this._shadowOffsetX = offsetX;
         this._shadowOffsetY = offsetY;
         this._shadowBlur = Math.max(0, blur);
-        this.invalidatePlainTextBatchCache();
+        this.refreshAfterEffectChange(false);
     }
 
     setViewportFrame(viewportWidth: number, viewportHeight: number, drawOffsetX: number, drawOffsetY: number, clipRectX: number, clipRectY: number, clipRectWidth: number, clipRectHeight: number): void {
-        const nextFrame: MsdfViewFrame = {
-            width: Math.max(0, viewportWidth),
-            height: Math.max(0, viewportHeight),
-            drawOffsetX: drawOffsetX || 0,
-            drawOffsetY: drawOffsetY || 0,
-            clipRectX: clipRectX || 0,
-            clipRectY: clipRectY || 0,
-            clipRectWidth: Math.max(0, clipRectWidth),
-            clipRectHeight: Math.max(0, clipRectHeight)
-        };
+        const nextFrame = this.createViewFrame(
+            viewportWidth,
+            viewportHeight,
+            drawOffsetX,
+            drawOffsetY,
+            clipRectX,
+            clipRectY,
+            clipRectWidth,
+            clipRectHeight
+        );
 
         if (this.sameViewFrame(this._viewFrame, nextFrame)) {
             return;
@@ -1258,8 +1295,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             return;
         }
         this._underline = value;
-        this._plainTextLayoutDirty = true;
-        this.refresh();
+        this.refreshAfterPlainTextLayoutChange();
     }
 
     set strikethrough(value: boolean) {
@@ -1267,8 +1303,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             return;
         }
         this._strikethrough = value;
-        this._plainTextLayoutDirty = true;
-        this.refresh();
+        this.refreshAfterPlainTextLayoutChange();
     }
 
     setRuns(value: MsdfRichTextRun[]): void {
@@ -1280,9 +1315,62 @@ export class MsdfTextSprite extends Laya.Sprite {
         this.font = font;
         this.materialInstance = this.font.renderState.material;
         this.material = this.materialInstance;
+        this.refreshAfterPlainTextLayoutChange(true);
+    }
+
+    private refreshAfterPlainTextLayoutChange(invalidateBatchCache: boolean = false): void {
         this._plainTextLayoutDirty = true;
+        if (invalidateBatchCache) {
+            this.invalidatePlainTextBatchCache();
+        }
+        this.refresh();
+    }
+
+    private refreshAfterPlainTextStyleChange(): void {
+        if (this._usesRuns) {
+            return;
+        }
+
         this.invalidatePlainTextBatchCache();
         this.refresh();
+    }
+
+    private refreshAfterEffectChange(refreshNow: boolean = true): void {
+        this.invalidatePlainTextBatchCache();
+        if (refreshNow) {
+            this.refresh();
+        }
+    }
+
+    private updateScrollValue(axis: "x" | "y", value: number): void {
+        const next = this.font
+            ? Math.min(Math.max(value || 0, 0), axis === "x" ? this.maxScrollX : this.maxScrollY)
+            : Math.max(value || 0, 0);
+        const current = axis === "x" ? this._scrollX : this._scrollY;
+        if (current === next) {
+            return;
+        }
+
+        if (axis === "x") {
+            this._scrollX = next;
+        } else {
+            this._scrollY = next;
+        }
+
+        this.refresh();
+    }
+
+    private createViewFrame(viewportWidth: number, viewportHeight: number, drawOffsetX: number, drawOffsetY: number, clipRectX: number, clipRectY: number, clipRectWidth: number, clipRectHeight: number): MsdfViewFrame {
+        return {
+            width: Math.max(0, viewportWidth),
+            height: Math.max(0, viewportHeight),
+            drawOffsetX: drawOffsetX || 0,
+            drawOffsetY: drawOffsetY || 0,
+            clipRectX: clipRectX || 0,
+            clipRectY: clipRectY || 0,
+            clipRectWidth: Math.max(0, clipRectWidth),
+            clipRectHeight: Math.max(0, clipRectHeight)
+        };
     }
 
     private resolveShrinkScale(contentWidth: number, contentHeight: number): number {
@@ -1373,7 +1461,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         return this._layout;
     }
 
-    private getPlainTextBatchStyleData(layout: MsdfLayout, vertexCount: number, flags: number): Omit<MsdfDrawBatch, "vertices" | "uvs" | "indices"> {
+    private getPlainTextBatchStyleData(layout: MsdfLayout, vertexCount: number, flags: number): MsdfBatchStyleData {
         // layout 已经标明了哪些 quad 是正文、下划线或删除线。
         // 这里把高层样式参数一次性展开成按顶点存储的打包数组，供 drawTrianglesMSDF 直接消费。
         const cache = this._plainTextBatchCache;
@@ -1451,6 +1539,14 @@ export class MsdfTextSprite extends Laya.Sprite {
         this.redraw();
     }
 
+    private applyRefreshResult(result: MsdfTextRefreshResult): void {
+        this._contentWidth = result.contentWidth;
+        this._contentHeight = result.contentHeight;
+        this._lines = result.lines;
+        this.clampScroll();
+        this.applyRenderState(result.drawBatches, result.layout ?? createEmptyLayout());
+    }
+
     private resetRenderState(): void {
         this._contentWidth = 0;
         this._contentHeight = 0;
@@ -1473,23 +1569,31 @@ export class MsdfTextSprite extends Laya.Sprite {
         })), shrinkScale);
     }
 
-    private buildPlainTextDrawBatches(shrinkScale: number): MsdfDrawBatch[] {
-        if (this._layout.indices.length === 0) {
-            return [];
+    private getScrollOffsetX(): number {
+        return this._overflow === "scroll" ? this._scrollX : 0;
+    }
+
+    private getScrollOffsetY(): number {
+        return this._overflow === "scroll" ? this._scrollY : 0;
+    }
+
+    private applyScrollOffsetToVertices(vertices: Float32Array): void {
+        const scrollOffsetX = this.getScrollOffsetX();
+        const scrollOffsetY = this.getScrollOffsetY();
+        if (scrollOffsetX === 0 && scrollOffsetY === 0) {
+            return;
         }
 
-        const vertexCount = this._layout.vertices.length >> 1;
-        const vertices = scaleVertices(this._layout.vertices, shrinkScale);
-        if (this._overflow === "scroll" && (this._scrollX !== 0 || this._scrollY !== 0)) {
-            for (let i = 0; i < vertices.length; i += 2) {
-                vertices[i] -= this._scrollX;
-                vertices[i + 1] -= this._scrollY;
-            }
+        for (let i = 0; i < vertices.length; i += 2) {
+            vertices[i] -= scrollOffsetX;
+            vertices[i + 1] -= scrollOffsetY;
         }
+    }
 
-        const flags = effectFlags(
-            this._outlineWidth,
-            this._outlineColor,
+    private getEffectFlagsForStyle(outlineWidth: number, outlineColor: Laya.Vector4): number {
+        return effectFlags(
+            outlineWidth,
+            outlineColor,
             this._glowSize,
             this._glowColor,
             this._shadowOffsetX,
@@ -1497,6 +1601,18 @@ export class MsdfTextSprite extends Laya.Sprite {
             this._shadowBlur,
             this._shadowColor
         );
+    }
+
+    private buildPlainTextDrawBatches(shrinkScale: number): MsdfDrawBatch[] {
+        if (this._layout.indices.length === 0) {
+            return [];
+        }
+
+        const vertexCount = this._layout.vertices.length >> 1;
+        const vertices = scaleVertices(this._layout.vertices, shrinkScale);
+        this.applyScrollOffsetToVertices(vertices);
+
+        const flags = this.getEffectFlagsForStyle(this._outlineWidth, this._outlineColor);
         const styleData = this.getPlainTextBatchStyleData(this._layout, vertexCount, flags);
 
         return [{
@@ -1510,6 +1626,31 @@ export class MsdfTextSprite extends Laya.Sprite {
             packedParamsA: styleData.packedParamsA,
             packedParamsB: styleData.packedParamsB
         }];
+    }
+
+    private buildPlainTextRefreshResult(): MsdfTextRefreshResult {
+        this._layout = this.getPlainTextLayout();
+        const shrinkScale = this.resolveShrinkScale(this._layout.width, this._layout.height);
+
+        return {
+            contentWidth: this._layout.width * shrinkScale,
+            contentHeight: this._layout.height * shrinkScale,
+            lines: this.buildPlainTextLineMetrics(shrinkScale),
+            drawBatches: this.buildPlainTextDrawBatches(shrinkScale),
+            layout: this._layout
+        };
+    }
+
+    private buildRichTextRefreshResult(): MsdfTextRefreshResult {
+        const lines = this.layoutRunsForShrink();
+        const shrinkScale = this.resolveShrinkScale(this._contentWidth, this._contentHeight);
+
+        return {
+            contentWidth: this._contentWidth * shrinkScale,
+            contentHeight: this._contentHeight * shrinkScale,
+            lines: this.buildRichTextLineMetrics(lines, shrinkScale),
+            drawBatches: this.buildRichTextDrawBatches(lines, shrinkScale)
+        };
     }
 
     private updateRichTextLineLayout(line: MsdfRichTextLine, fallbackHeight: number): void {
@@ -1548,6 +1689,440 @@ export class MsdfTextSprite extends Laya.Sprite {
         };
     }
 
+    private createRichTextLayoutState(): MsdfRichTextLayoutState {
+        return {
+            lines: [],
+            rectWidth: this._wordWrapWidth > 0
+                ? this._wordWrapWidth
+                : this._layoutWidth >= 0
+                    ? this._layoutWidth
+                    : Number.MAX_VALUE,
+            rectHeight: this._layoutHeight >= 0 ? this._layoutHeight : Number.MAX_VALUE,
+            metricCache: new WeakMap(),
+            lineX: 0,
+            lineY: 0,
+            lastHeight: this.font.getLineHeight(this._runs[0]?.style.fontSize ?? this.font.lineHeight),
+            currentLine: null,
+            lastCmd: null
+        };
+    }
+
+    private getRichTextFallbackStyle(): MsdfRichTextStyle | null {
+        return this._runs[this._runs.length - 1]?.style ?? this._runs[0]?.style ?? null;
+    }
+
+    private rebuildRichTextLine(
+        line: MsdfRichTextLine,
+        segments: Array<{ text: string; style: MsdfRichTextStyle; }>,
+        fallbackHeight: number,
+        metricCache: MsdfRichTextMetricCache
+    ): void {
+        // 在 ellipsis 或重排后，用新的 segments 重新搭建这一行的命令链。
+        let width = 0;
+        let prev: MsdfRichTextCommand | null = null;
+
+        line.cmd = null;
+        line.align = segments[0]?.style.align || this._defaultAlign;
+        line.alignItems = segments[0]?.style.alignItems || this._alignItems;
+
+        for (const segment of segments) {
+            if (!segment.text) {
+                continue;
+            }
+
+            const metrics = this.getRichTextMetrics(segment.text, segment.style, metricCache);
+            const cmdHeight = Math.max(metrics.height, 1);
+            const cmd: MsdfRichTextCommand = {
+                text: segment.text,
+                style: segment.style,
+                x: width,
+                y: 0,
+                width: metrics.width,
+                height: cmdHeight,
+                next: null,
+                prev
+            };
+
+            if (prev) {
+                prev.next = cmd;
+            } else {
+                line.cmd = cmd;
+            }
+
+            prev = cmd;
+            width += Math.round(cmd.width);
+        }
+
+        this.updateRichTextLineLayout(line, Math.max(fallbackHeight, 1));
+    }
+
+    private appendRichTextCommand(
+        state: MsdfRichTextLayoutState,
+        text: string,
+        style: MsdfRichTextStyle,
+        metrics?: MsdfRichTextMetrics
+    ): void {
+        // cmd 是富文本排版阶段的中间结构，后续才会展开成真正提交给 GPU 的顶点数据。
+        if (!text || !state.currentLine) {
+            return;
+        }
+
+        const resolvedMetrics = metrics ?? this.getRichTextMetrics(text, style, state.metricCache);
+        const cmdHeight = Math.max(resolvedMetrics.height, 1);
+        const cmd: MsdfRichTextCommand = {
+            text,
+            style,
+            x: state.lineX,
+            y: 0,
+            width: resolvedMetrics.width,
+            height: cmdHeight,
+            next: null,
+            prev: state.lastCmd
+        };
+
+        if (!state.currentLine.cmd) {
+            state.currentLine.align = style.align || this._defaultAlign;
+            state.currentLine.alignItems = style.alignItems || this._alignItems;
+        }
+
+        state.lineX += Math.round(cmd.width);
+        if (state.lastCmd) {
+            state.lastCmd.next = cmd;
+        } else {
+            state.currentLine.cmd = cmd;
+        }
+        state.lastCmd = cmd;
+        state.lastHeight = cmdHeight;
+    }
+
+    private advanceRichTextLine(state: MsdfRichTextLayoutState, last: boolean = false): MsdfRichTextLine | null {
+        // 结束当前行并推进到下一行。last=true 表示只做收尾，不再创建新行。
+        state.lineX = 0;
+
+        if (state.currentLine) {
+            this.updateRichTextLineLayout(state.currentLine, state.lastHeight);
+            state.lineY += state.currentLine.height + this._lineSpacing;
+        }
+
+        if (last) {
+            return null;
+        }
+
+        state.currentLine = this.createRichTextLine(state.lineY);
+        state.lines.push(state.currentLine);
+        state.lastCmd = null;
+        return state.currentLine;
+    }
+
+    private splitRichTextCommandAt(cmd: MsdfRichTextCommand, pos: number, metricCache: MsdfRichTextMetricCache): boolean {
+        // 把一个命令从中间切开，常用于把过长的单词或片段拆到下一行。
+        const code = cmd.text.charCodeAt(pos);
+        if (isLowSurrogate(code)) {
+            pos--;
+        }
+
+        if (pos <= 0) {
+            return false;
+        }
+
+        const tail = cmd.text.substring(pos);
+        cmd.text = cmd.text.substring(0, pos);
+        cmd.width = this.getRichTextMetrics(cmd.text, cmd.style, metricCache).width;
+
+        const nextCmd: MsdfRichTextCommand = {
+            text: tail,
+            style: cmd.style,
+            x: 0,
+            y: 0,
+            width: this.getRichTextMetrics(tail, cmd.style, metricCache).width,
+            height: cmd.height,
+            next: cmd.next,
+            prev: cmd
+        };
+
+        if (nextCmd.next) {
+            nextCmd.next.prev = nextCmd;
+        }
+
+        cmd.next = nextCmd;
+        return true;
+    }
+
+    private moveRichTextCommands(state: MsdfRichTextLayoutState, cmd: MsdfRichTextCommand | null): void {
+        // 从某个命令开始，把后续命令整体迁移到当前行，避免重新创建和重新测量。
+        if (!cmd || !state.currentLine) {
+            return;
+        }
+
+        if (cmd.prev) {
+            cmd.prev.next = null;
+        }
+
+        while (cmd) {
+            const next = cmd.next;
+            cmd.x = state.lineX;
+            cmd.y = 0;
+            cmd.next = null;
+            cmd.prev = state.lastCmd;
+
+            if (!state.lastCmd) {
+                state.currentLine.align = cmd.style.align || this._defaultAlign;
+                state.currentLine.alignItems = cmd.style.alignItems || this._alignItems;
+                state.currentLine.cmd = cmd;
+            } else {
+                state.lastCmd.next = cmd;
+            }
+
+            state.lineX += Math.round(cmd.width);
+            state.lastCmd = cmd;
+            cmd = next;
+        }
+    }
+
+    private getRichTextWrapCharInfo(text: string, index: number, emoji: boolean, style: MsdfRichTextStyle): MsdfRichTextWrapCharInfo {
+        let charText = text.charAt(index);
+        const code = charText.charCodeAt(0);
+        if (emoji && isHighSurrogate(code) && index + 1 < text.length) {
+            charText += text.charAt(index + 1);
+        }
+
+        return {
+            text: charText,
+            code,
+            width: this.font.measureTextWidth(charText, style.fontSize, this._letterSpacing) * styleScaleX(style)
+        };
+    }
+
+    private tryMoveTrailingWordToNextLine(state: MsdfRichTextLayoutState, currentPartLength: number, isPunctuation: boolean): boolean {
+        let cmd: MsdfRichTextCommand | null = state.lastCmd;
+        let totalLen = currentPartLength;
+        let match: RegExpExecArray | null = null;
+
+        // 当前 run 放不下时，回溯当前行里已有的命令，尝试把整词一起挪到下一行。
+        while (cmd) {
+            if (cmd.width > 0) {
+                match = wordBoundaryTest.exec(cmd.text);
+                const textLen = cmd.text.length;
+                if (match == null) {
+                    this.advanceRichTextLine(state);
+                    if (isPunctuation && totalLen === 0) {
+                        if (this.splitRichTextCommandAt(cmd, textLen - 1, state.metricCache)) {
+                            this.moveRichTextCommands(state, cmd.next);
+                        } else if (cmd.x > 0) {
+                            this.moveRichTextCommands(state, cmd);
+                        }
+                    } else if (cmd.next) {
+                        this.moveRichTextCommands(state, cmd.next);
+                    }
+                    return true;
+                }
+
+                if (match.index > 0) {
+                    if (match.index > textLen - (maxWordLength - totalLen)) {
+                        this.advanceRichTextLine(state);
+                        if (this.splitRichTextCommandAt(cmd, match.index, state.metricCache)) {
+                            this.moveRichTextCommands(state, cmd.next);
+                        }
+                        return true;
+                    }
+                    return false;
+                }
+
+                totalLen += textLen;
+                if (totalLen >= maxWordLength) {
+                    return false;
+                }
+            }
+
+            cmd = cmd.prev;
+        }
+
+        return false;
+    }
+
+    private resolveWordBoundaryWrapAdjustment(
+        state: MsdfRichTextLayoutState,
+        text: string,
+        style: MsdfRichTextStyle,
+        startIndex: number,
+        index: number,
+        part: string,
+        wordWidth: number,
+        charInfo: MsdfRichTextWrapCharInfo,
+        charWidth: number | null,
+        emoji: boolean,
+        noBreakWord: boolean,
+        remainWidth: number
+    ): MsdfRichTextWrapAdjustment {
+        const result: MsdfRichTextWrapAdjustment = {
+            index,
+            part,
+            wordWidth,
+            charWidth,
+            remainWidth,
+            continueLoop: false
+        };
+
+        if (!noBreakWord) {
+            return result;
+        }
+
+        let isPunctuation = false;
+        if (!((charInfo.code >= 65 && charInfo.code <= 90)
+            || (charInfo.code >= 97 && charInfo.code <= 122)
+            || (charInfo.code >= 48 && charInfo.code <= 57)
+            || (isPunctuation = punctuationChars.has(charInfo.code)))) {
+            return result;
+        }
+
+        const wordBoundary = part.length > 0 ? (wordBoundaryTest.exec(part)?.index ?? null) : 0;
+        if (wordBoundary > 0) {
+            if (wordBoundary > part.length - maxWordLength) {
+                result.index = startIndex + wordBoundary;
+                result.part = text.substring(startIndex, result.index);
+                result.wordWidth = this.getRichTextMetrics(result.part, style, state.metricCache).width;
+                result.charWidth = null;
+            }
+            return result;
+        }
+
+        if (wordBoundary != null && state.lastCmd != null) {
+            const movedToNewLine = this.tryMoveTrailingWordToNextLine(state, part.length, isPunctuation);
+            if (movedToNewLine) {
+                result.remainWidth = state.rectWidth - state.lineX;
+                if (result.charWidth != null && result.wordWidth + result.charWidth < result.remainWidth) {
+                    result.wordWidth += result.charWidth;
+                    result.continueLoop = true;
+                }
+            }
+            return result;
+        }
+
+        if (isPunctuation) {
+            const backup = (emoji && index >= 1 && isLowSurrogate(text.charCodeAt(index - 1))) ? 2 : 1;
+            if (index - backup > startIndex || state.lineX > 0) {
+                result.index -= backup;
+                result.part = text.substring(startIndex, result.index);
+                result.wordWidth = this.getRichTextMetrics(result.part, style, state.metricCache).width;
+                result.charWidth = null;
+            }
+        }
+
+        return result;
+    }
+
+    private advanceWrappedSegmentState(
+        state: MsdfRichTextLayoutState,
+        text: string,
+        index: number,
+        charInfo: MsdfRichTextWrapCharInfo,
+        charWidth: number | null,
+        emoji: boolean,
+        style: MsdfRichTextStyle,
+        italicExtra: number,
+        extraWidth: number
+    ): MsdfRichTextWrapAdvance {
+        this.advanceRichTextLine(state);
+
+        const nextState: MsdfRichTextWrapAdvance = {
+            index,
+            startIndex: index,
+            remainWidth: state.rectWidth,
+            wordWidth: italicExtra + extraWidth
+        };
+
+        if (charWidth != null) {
+            nextState.wordWidth += charWidth;
+            if (charInfo.text.length > 1) {
+                nextState.index++;
+            }
+        } else if (emoji && isHighSurrogate(text.charCodeAt(index))) {
+            nextState.index++;
+        }
+
+        if (charWidth == null && nextState.index < text.length - 1) {
+            nextState.wordWidth = this.getRichTextMetrics(text.substring(nextState.startIndex, nextState.index + 1), style, state.metricCache).width;
+        }
+
+        return nextState;
+    }
+
+    private wrapRichTextSegment(
+        state: MsdfRichTextLayoutState,
+        text: string,
+        style: MsdfRichTextStyle,
+        noBreakWord: boolean
+    ): void {
+        // 换行策略分两步：
+        // 1. 先按字符试探这一段还能在本行放下多少；
+        // 2. 再尽量回退到词边界，避免把英文/数字单词硬拆开。
+        const rectWidth = state.rectWidth;
+        let remainWidth = Math.max(0, rectWidth - state.lineX);
+        const styleMetrics = this.getRichTextRenderMetrics(style, state.metricCache);
+        const totalMetrics = this.getRichTextMetrics(text, style, state.metricCache);
+        const italicExtra = styleSkewExtra(styleMetrics.height, style);
+
+        if (totalMetrics.width <= remainWidth) {
+            this.appendRichTextCommand(state, text, style, totalMetrics);
+            return;
+        }
+
+        let startIndex = 0;
+        let wordWidth = italicExtra + styleMetrics.extraWidth;
+        const emoji = emojiTest.test(text);
+        const len = text.length;
+
+        for (let j = 0; j < len; j++) {
+            const charInfo = this.getRichTextWrapCharInfo(text, j, emoji, style);
+            let charWidth: number | null = charInfo.width;
+            wordWidth += charWidth;
+
+            if (wordWidth <= remainWidth || (j === startIndex && state.lineX === 0)) {
+                if (charInfo.text.length > 1) {
+                    j++;
+                }
+                continue;
+            }
+
+            let part = text.substring(startIndex, j);
+            wordWidth -= charWidth;
+            const adjustment = this.resolveWordBoundaryWrapAdjustment(
+                state,
+                text,
+                style,
+                startIndex,
+                j,
+                part,
+                wordWidth,
+                charInfo,
+                charWidth,
+                emoji,
+                noBreakWord,
+                remainWidth
+            );
+            j = adjustment.index;
+            part = adjustment.part;
+            wordWidth = adjustment.wordWidth;
+            charWidth = adjustment.charWidth;
+            remainWidth = adjustment.remainWidth;
+            if (adjustment.continueLoop) {
+                continue;
+            }
+
+            if (part.length > 0) {
+                this.appendRichTextCommand(state, part, style, { width: wordWidth, height: styleMetrics.height });
+            }
+
+            const advanced = this.advanceWrappedSegmentState(state, text, j, charInfo, charWidth, emoji, style, italicExtra, styleMetrics.extraWidth);
+            j = advanced.index;
+            startIndex = advanced.startIndex;
+            remainWidth = advanced.remainWidth;
+            wordWidth = advanced.wordWidth;
+        }
+
+        this.appendRichTextCommand(state, text.substring(startIndex, len), style);
+    }
+
     private buildRichTextLineMetrics(lines: MsdfRichTextLine[], shrinkScale: number): MsdfTextLineMetric[] {
         return this.scaleLineMetrics(lines.map(line => ({
             x: 0,
@@ -1571,6 +2146,94 @@ export class MsdfTextSprite extends Laya.Sprite {
         return { width, height };
     }
 
+    private evaluateRichTextShrinkCandidate(wrapWidth: number, widthLimit: number, heightLimit: number): MsdfRichTextShrinkCandidate {
+        this._wordWrapWidth = wrapWidth;
+        const lines = this.layoutRuns();
+        const contentWidth = this._contentWidth;
+        const contentHeight = this._contentHeight;
+        const widthScale = contentWidth > 0 ? Math.min(widthLimit / contentWidth, 1) : 1;
+        const heightScale = contentHeight > 0 ? Math.min(heightLimit / contentHeight, 1) : 1;
+        const scale = Math.min(widthScale, heightScale);
+
+        return {
+            lines,
+            contentWidth,
+            contentHeight,
+            widthScale,
+            heightScale,
+            scale,
+            fillScore: (contentWidth * scale) / widthLimit + (contentHeight * scale) / heightLimit
+        };
+    }
+
+    private pickBetterRichTextShrinkCandidate(
+        left: MsdfRichTextShrinkCandidate,
+        right: MsdfRichTextShrinkCandidate,
+        scaleEpsilon: number
+    ): MsdfRichTextShrinkCandidate {
+        if (right.scale > left.scale + scaleEpsilon) {
+            return right;
+        }
+
+        if (Math.abs(right.scale - left.scale) <= scaleEpsilon && right.fillScore > left.fillScore) {
+            return right;
+        }
+
+        return left;
+    }
+
+    private isRichTextShrinkCandidateBalanced(candidate: MsdfRichTextShrinkCandidate, scaleEpsilon: number): boolean {
+        return candidate.widthScale <= candidate.heightScale + scaleEpsilon;
+    }
+
+    private searchBetterRichTextShrinkCandidate(
+        initialBest: MsdfRichTextShrinkCandidate,
+        originalWrapWidth: number,
+        widthLimit: number,
+        heightLimit: number,
+        scaleEpsilon: number,
+        balanceEpsilon: number
+    ): MsdfRichTextShrinkCandidate {
+        let best = initialBest;
+        let leftWidth = originalWrapWidth;
+        let rightWidth = originalWrapWidth;
+        let rightCandidate = initialBest;
+
+        for (let i = 0; i < 3; i++) {
+            rightWidth *= 2;
+            rightCandidate = this.evaluateRichTextShrinkCandidate(rightWidth, widthLimit, heightLimit);
+            best = this.pickBetterRichTextShrinkCandidate(best, rightCandidate, scaleEpsilon);
+            if (this.isRichTextShrinkCandidateBalanced(rightCandidate, scaleEpsilon)
+                || rightCandidate.scale >= 1 - scaleEpsilon) {
+                break;
+            }
+        }
+
+        if (!this.isRichTextShrinkCandidateBalanced(rightCandidate, scaleEpsilon)) {
+            return best;
+        }
+
+        for (let i = 0; i < 4; i++) {
+            const midWidth = (leftWidth + rightWidth) * 0.5;
+            const midCandidate = this.evaluateRichTextShrinkCandidate(midWidth, widthLimit, heightLimit);
+            best = this.pickBetterRichTextShrinkCandidate(best, midCandidate, scaleEpsilon);
+
+            if (Math.abs(midCandidate.widthScale - midCandidate.heightScale) <= balanceEpsilon
+                || midCandidate.scale >= 1 - scaleEpsilon
+                || rightWidth - leftWidth <= 1) {
+                break;
+            }
+
+            if (midCandidate.widthScale > midCandidate.heightScale + scaleEpsilon) {
+                leftWidth = midWidth;
+            } else {
+                rightWidth = midWidth;
+            }
+        }
+
+        return best;
+    }
+
     private layoutRunsForShrink(): MsdfRichTextLine[] {
         if (this._overflow !== "shrink" || this._wordWrapWidth <= 0 || this._layoutHeight <= 0) {
             return this.layoutRuns();
@@ -1578,86 +2241,21 @@ export class MsdfTextSprite extends Laya.Sprite {
 
         const originalWrapWidth = this._wordWrapWidth;
         const widthLimit = originalWrapWidth;
+        const heightLimit = this._layoutHeight;
         const scaleEpsilon = 0.0001;
         const balanceEpsilon = 0.02;
-        type ShrinkCandidate = {
-            lines: MsdfRichTextLine[];
-            contentWidth: number;
-            contentHeight: number;
-            widthScale: number;
-            heightScale: number;
-            scale: number;
-            fillScore: number;
-        };
-
-        const evaluate = (wrapWidth: number): ShrinkCandidate => {
-            this._wordWrapWidth = wrapWidth;
-            const lines = this.layoutRuns();
-            const contentWidth = this._contentWidth;
-            const contentHeight = this._contentHeight;
-            const widthScale = contentWidth > 0 ? Math.min(widthLimit / contentWidth, 1) : 1;
-            const heightScale = contentHeight > 0 ? Math.min(this._layoutHeight / contentHeight, 1) : 1;
-            const scale = Math.min(widthScale, heightScale);
-            return {
-                lines,
-                contentWidth,
-                contentHeight,
-                widthScale,
-                heightScale,
-                scale,
-                fillScore: (contentWidth * scale) / widthLimit + (contentHeight * scale) / this._layoutHeight
-            };
-        };
-
-        const pickBetter = (left: ShrinkCandidate, right: ShrinkCandidate): ShrinkCandidate => {
-            if (right.scale > left.scale + scaleEpsilon) {
-                return right;
-            }
-
-            if (Math.abs(right.scale - left.scale) <= scaleEpsilon && right.fillScore > left.fillScore) {
-                return right;
-            }
-
-            return left;
-        };
-
-        let best = evaluate(originalWrapWidth);
+        let best = this.evaluateRichTextShrinkCandidate(originalWrapWidth, widthLimit, heightLimit);
 
         try {
             if (best.widthScale > best.heightScale + scaleEpsilon) {
-                let leftWidth = originalWrapWidth;
-                let rightWidth = originalWrapWidth;
-                let rightCandidate = best;
-
-                for (let i = 0; i < 3; i++) {
-                    rightWidth *= 2;
-                    rightCandidate = evaluate(rightWidth);
-                    best = pickBetter(best, rightCandidate);
-                    if (rightCandidate.widthScale <= rightCandidate.heightScale + scaleEpsilon
-                        || rightCandidate.scale >= 1 - scaleEpsilon) {
-                        break;
-                    }
-                }
-
-                if (rightCandidate.widthScale <= rightCandidate.heightScale + scaleEpsilon) {
-                    for (let i = 0; i < 4; i++) {
-                        const midWidth = (leftWidth + rightWidth) * 0.5;
-                        const midCandidate = evaluate(midWidth);
-                        best = pickBetter(best, midCandidate);
-
-                        if (Math.abs(midCandidate.widthScale - midCandidate.heightScale) <= balanceEpsilon
-                            || midCandidate.scale >= 1 - scaleEpsilon
-                            || rightWidth - leftWidth <= 1) {
-                            break;
-                        }
-
-                        if (midCandidate.widthScale > midCandidate.heightScale + scaleEpsilon) {
-                            leftWidth = midWidth;
-                        } else {
-                            rightWidth = midWidth;
-                        }
-                    }
-                }
+                best = this.searchBetterRichTextShrinkCandidate(
+                    best,
+                    originalWrapWidth,
+                    widthLimit,
+                    heightLimit,
+                    scaleEpsilon,
+                    balanceEpsilon
+                );
             }
         } finally {
             this._wordWrapWidth = originalWrapWidth;
@@ -1849,13 +2447,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             return;
         }
 
-        this._layout = this.getPlainTextLayout();
-        const shrinkScale = this.resolveShrinkScale(this._layout.width, this._layout.height);
-        this._contentWidth = this._layout.width * shrinkScale;
-        this._contentHeight = this._layout.height * shrinkScale;
-        this._lines = this.buildPlainTextLineMetrics(shrinkScale);
-        this.clampScroll();
-        this.applyRenderState(this.buildPlainTextDrawBatches(shrinkScale), this._layout);
+        this.applyRefreshResult(this.buildPlainTextRefreshResult());
     }
 
     private refreshRichText(): void {
@@ -1869,51 +2461,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             return;
         }
 
-        const lines = this.layoutRunsForShrink();
-        const shrinkScale = this.resolveShrinkScale(this._contentWidth, this._contentHeight);
-        this._contentWidth *= shrinkScale;
-        this._contentHeight *= shrinkScale;
-        this._lines = this.buildRichTextLineMetrics(lines, shrinkScale);
-        this.clampScroll();
-        const contentBoxWidth = this._layoutWidth >= 0 ? this._layoutWidth : this._contentWidth;
-        const drawBatches: MsdfDrawBatch[] = [];
-        // 富文本里同样的“文本片段 + 样式”组合可能重复出现。
-        // 先缓存每个 run 的布局，再把可合并的 run 拼成更大的 GPU batch。
-        const layoutCache = new WeakMap<MsdfRichTextStyle, Map<string, MsdfLayout>>();
-        let pendingGroup: MsdfDrawBatchGroup | null = null;
-
-        for (const line of lines) {
-            const lineAlign = line.align || this._defaultAlign;
-            const lineOffsetX = lineAlign === "center"
-                ? Math.max((contentBoxWidth - line.width * shrinkScale) * 0.5, 0)
-                : lineAlign === "right"
-                    ? Math.max(contentBoxWidth - line.width * shrinkScale, 0)
-                    : 0;
-
-            let cmd = line.cmd;
-            while (cmd) {
-                const batch = this.buildRunBatch(
-                    cmd,
-                    lineOffsetX + cmd.x * shrinkScale - (this._overflow === "scroll" ? this._scrollX : 0),
-                    (line.y + cmd.y) * shrinkScale - (this._overflow === "scroll" ? this._scrollY : 0),
-                    layoutCache,
-                    shrinkScale
-                );
-                if (batch) {
-                    if (pendingGroup && canMergeBatchGroup(pendingGroup, batch)) {
-                        mergeBatchGroup(pendingGroup, batch);
-                    } else {
-                        pendingGroup = appendBatchGroup(drawBatches, pendingGroup);
-                        pendingGroup = createBatchGroup(batch);
-                    }
-                }
-                cmd = cmd.next;
-            }
-        }
-
-        appendBatchGroup(drawBatches, pendingGroup);
-
-        this.applyRenderState(drawBatches);
+        this.applyRefreshResult(this.buildRichTextRefreshResult());
     }
 
     private syncMaterial(): void {
@@ -1938,9 +2486,9 @@ export class MsdfTextSprite extends Laya.Sprite {
 
         this.syncMaterial();
 
+        const needsClip = this._overflow === "hidden" || this._overflow === "scroll";
         const clipWidth = this._viewFrame.clipRectWidth >= 0 ? this._viewFrame.clipRectWidth : this.width;
         const clipHeight = this._viewFrame.clipRectHeight >= 0 ? this._viewFrame.clipRectHeight : this.height;
-        const needsClip = this._overflow === "hidden" || this._overflow === "scroll";
         if (needsClip && (clipWidth <= 0 || clipHeight <= 0)) {
             return;
         }
@@ -1955,6 +2503,14 @@ export class MsdfTextSprite extends Laya.Sprite {
         const drawOffsetX = this._viewFrame.drawOffsetX;
         const drawOffsetY = this._viewFrame.drawOffsetY;
 
+        this.drawCurrentBatches(drawOffsetX, drawOffsetY);
+
+        if (clipped) {
+            this.graphics.restore();
+        }
+    }
+
+    private drawCurrentBatches(drawOffsetX: number, drawOffsetY: number): void {
         for (const batch of this._drawBatches) {
             this.graphics.drawTrianglesMSDF(
                 this.font.texture,
@@ -1971,10 +2527,54 @@ export class MsdfTextSprite extends Laya.Sprite {
                 batch.packedParamsB
             );
         }
+    }
 
-        if (clipped) {
-            this.graphics.restore();
+    private appendRichTextLineText(state: MsdfRichTextLayoutState, text: string, style: MsdfRichTextStyle, wordWrap: boolean): void {
+        if (!text) {
+            return;
         }
+
+        if (wordWrap) {
+            this.wrapRichTextSegment(state, text, style, true);
+        } else {
+            this.appendRichTextCommand(state, text, style);
+        }
+    }
+
+    private appendRichTextRunSegments(state: MsdfRichTextLayoutState, run: MsdfRichTextRun, wordWrap: boolean): void {
+        if (!run.text) {
+            return;
+        }
+
+        state.lastHeight = this.getRichTextRenderMetrics(run.style, state.metricCache).height;
+        const splitLines = run.text.split("\n");
+
+        for (let i = 0, n = splitLines.length; i < n; i++) {
+            this.appendRichTextLineText(state, splitLines[i], run.style, wordWrap);
+
+            if (i !== n - 1) {
+                this.advanceRichTextLine(state);
+            }
+        }
+    }
+
+    private finalizeRichTextLayout(state: MsdfRichTextLayoutState): MsdfRichTextLine[] {
+        this.advanceRichTextLine(state, true);
+        // 先完成正常排版，再统一做 ellipsis 裁剪，这样可以复用已有的测量和重建逻辑。
+        this.applyEllipsisToRichTextLines(
+            state.lines,
+            state.rectWidth,
+            state.rectHeight,
+            state.lastHeight,
+            (text, style) => this.getRichTextMetrics(text, style, state.metricCache),
+            (line, segments, fallbackHeight) => this.rebuildRichTextLine(line, segments, fallbackHeight, state.metricCache),
+            () => this.getRichTextFallbackStyle()
+        );
+
+        const measured = this.measureRichTextLines(state.lines);
+        this._contentWidth = measured.width;
+        this._contentHeight = measured.height;
+        return state.lines;
     }
 
     private collectLineText(line: MsdfRichTextLine): string {
@@ -1990,374 +2590,131 @@ export class MsdfTextSprite extends Laya.Sprite {
     private layoutRuns(): MsdfRichTextLine[] {
         // 富文本会先变成链表形式的中间结构（line -> cmd -> cmd ...），
         // 这样在换行、拆分、ellipsis 裁剪时成本更低，最后再展开成顶点数据。
-        const lines: MsdfRichTextLine[] = [];
+        const state = this.createRichTextLayoutState();
         const wordWrap = this._wordWrapWidth > 0;
-        const noBreakWord = wordWrap;
-        const rectWidth = wordWrap
-            ? this._wordWrapWidth
-            : this._layoutWidth >= 0
-                ? this._layoutWidth
-                : Number.MAX_VALUE;
-        const rectHeight = this._layoutHeight >= 0 ? this._layoutHeight : Number.MAX_VALUE;
-        const metricCache: MsdfRichTextMetricCache = new WeakMap();
 
-        let lineX = 0;
-        let lineY = 0;
-        let lastHeight = this.font.getLineHeight(this._runs[0]?.style.fontSize ?? this.font.lineHeight);
-        let currentLine: MsdfRichTextLine | null = null;
-        let lastCmd: MsdfRichTextCommand | null = null;
-
-        const getFallbackStyle = (): MsdfRichTextStyle | null => {
-            return this._runs[this._runs.length - 1]?.style ?? this._runs[0]?.style ?? null;
-        };
-
-        const rebuildLine = (line: MsdfRichTextLine, segments: Array<{ text: string; style: MsdfRichTextStyle; }>, fallbackHeight: number): void => {
-            // 在 ellipsis 或重排后，用新的 segments 重新搭建这一行的命令链。
-            let width = 0;
-            let prev: MsdfRichTextCommand | null = null;
-
-            line.cmd = null;
-            line.align = segments[0]?.style.align || this._defaultAlign;
-            line.alignItems = segments[0]?.style.alignItems || this._alignItems;
-
-            for (const segment of segments) {
-                if (!segment.text) {
-                    continue;
-                }
-
-                const metrics = this.getRichTextMetrics(segment.text, segment.style, metricCache);
-                const cmdHeight = Math.max(metrics.height, 1);
-                const cmd: MsdfRichTextCommand = {
-                    text: segment.text,
-                    style: segment.style,
-                    x: width,
-                    y: 0,
-                    width: metrics.width,
-                    height: cmdHeight,
-                    next: null,
-                    prev
-                };
-
-                if (prev) {
-                    prev.next = cmd;
-                } else {
-                    line.cmd = cmd;
-                }
-
-                prev = cmd;
-                width += Math.round(cmd.width);
-            }
-
-            this.updateRichTextLineLayout(line, Math.max(fallbackHeight, 1));
-        };
-
-        const addCmd = (text: string, style: MsdfRichTextStyle, metrics?: { width: number; height: number; }): void => {
-            // cmd 是富文本排版阶段的中间结构，后续才会展开成真正提交给 GPU 的顶点数据。
-            if (!text) {
-                return;
-            }
-
-            const resolvedMetrics = metrics ?? this.getRichTextMetrics(text, style, metricCache);
-            const cmdHeight = Math.max(resolvedMetrics.height, 1);
-            const cmd: MsdfRichTextCommand = {
-                text,
-                style,
-                x: lineX,
-                y: 0,
-                width: resolvedMetrics.width,
-                height: cmdHeight,
-                next: null,
-                prev: lastCmd
-            };
-
-            if (!currentLine) {
-                return;
-            }
-
-            if (!currentLine.cmd) {
-                currentLine.align = style.align || this._defaultAlign;
-                currentLine.alignItems = style.alignItems || this._alignItems;
-            }
-
-            lineX += Math.round(cmd.width);
-            if (lastCmd) {
-                lastCmd.next = cmd;
-            } else {
-                currentLine.cmd = cmd;
-            }
-            lastCmd = cmd;
-            lastHeight = cmdHeight;
-        };
-
-        const addLine = (last: boolean = false): MsdfRichTextLine | null => {
-            // 结束当前行并推进到下一行。last=true 表示只做收尾，不再创建新行。
-            lineX = 0;
-
-            if (currentLine) {
-                this.updateRichTextLineLayout(currentLine, lastHeight);
-                lineY += currentLine.height + this._lineSpacing;
-            }
-
-            if (last) {
-                return null;
-            }
-
-            currentLine = this.createRichTextLine(lineY);
-            lines.push(currentLine);
-            lastCmd = null;
-            return currentLine;
-        };
-
-        const splitCmd = (cmd: MsdfRichTextCommand, pos: number): boolean => {
-            // 把一个命令从中间切开，常用于把过长的单词或片段拆到下一行。
-            const code = cmd.text.charCodeAt(pos);
-            if (isLowSurrogate(code)) {
-                pos--;
-            }
-
-            if (pos <= 0) {
-                return false;
-            }
-
-            const tail = cmd.text.substring(pos);
-            cmd.text = cmd.text.substring(0, pos);
-            cmd.width = this.getRichTextMetrics(cmd.text, cmd.style, metricCache).width;
-
-            const nextCmd: MsdfRichTextCommand = {
-                text: tail,
-                style: cmd.style,
-                x: 0,
-                y: 0,
-                width: this.getRichTextMetrics(tail, cmd.style, metricCache).width,
-                height: cmd.height,
-                next: cmd.next,
-                prev: cmd
-            };
-
-            if (nextCmd.next) {
-                nextCmd.next.prev = nextCmd;
-            }
-
-            cmd.next = nextCmd;
-            return true;
-        };
-
-        const moveCmds = (cmd: MsdfRichTextCommand | null): void => {
-            // 从某个命令开始，把后续命令整体迁移到当前行，避免重新创建和重新测量。
-            if (!cmd || !currentLine) {
-                return;
-            }
-
-            if (cmd.prev) {
-                cmd.prev.next = null;
-            }
-
-            while (cmd) {
-                const next = cmd.next;
-                cmd.x = lineX;
-                cmd.y = 0;
-                cmd.next = null;
-                cmd.prev = lastCmd;
-
-                if (!lastCmd) {
-                    currentLine.align = cmd.style.align || this._defaultAlign;
-                    currentLine.alignItems = cmd.style.alignItems || this._alignItems;
-                    currentLine.cmd = cmd;
-                } else {
-                    lastCmd.next = cmd;
-                }
-
-                lineX += Math.round(cmd.width);
-                lastCmd = cmd;
-                cmd = next;
-            }
-        };
-
-        const wrapText = (text: string, style: MsdfRichTextStyle): void => {
-            // 换行策略分两步：
-            // 1. 先按字符试探这一段还能在本行放下多少；
-            // 2. 再尽量回退到词边界，避免把英文/数字单词硬拆开。
-            let remainWidth = Math.max(0, rectWidth - lineX);
-            const styleMetrics = this.getRichTextRenderMetrics(style, metricCache);
-            const totalMetrics = this.getRichTextMetrics(text, style, metricCache);
-            let totalWidth = totalMetrics.width;
-            const italicExtra = styleSkewExtra(styleMetrics.height, style);
-            const getCharWidth = (charText: string): number => this.font.measureTextWidth(charText, style.fontSize, this._letterSpacing) * styleScaleX(style);
-
-            if (totalWidth <= remainWidth) {
-                addCmd(text, style, totalMetrics);
-                return;
-            }
-
-            let startIndex = 0;
-            let wordWidth = italicExtra + styleMetrics.extraWidth;
-            let isPunctuation = false;
-            let match: RegExpExecArray | null = null;
-            const emoji = emojiTest.test(text);
-            const len = text.length;
-
-            for (let j = 0; j < len; j++) {
-                let charText = text.charAt(j);
-                const code = charText.charCodeAt(0);
-                if (emoji && isHighSurrogate(code) && j + 1 < len) {
-                    charText += text.charAt(j + 1);
-                }
-
-                let charWidth: number | null = getCharWidth(charText);
-                wordWidth += charWidth;
-
-                if (wordWidth <= remainWidth || (j === startIndex && lineX === 0)) {
-                    if (charText.length > 1) {
-                        j++;
-                    }
-                    continue;
-                }
-
-                let part = text.substring(startIndex, j);
-                wordWidth -= charWidth;
-
-                if (noBreakWord && ((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || (isPunctuation = punctuationChars.has(code)))) {
-                    // 对英文、数字和标点做额外边界处理，让“词”尽量保持完整。
-                    const wordBoundary = part.length > 0 ? ((match = wordBoundaryTest.exec(part)) ? match.index : null) : 0;
-                    if (wordBoundary > 0) {
-                        if (wordBoundary > part.length - maxWordLength) {
-                            j = startIndex + wordBoundary;
-                            part = text.substring(startIndex, j);
-                            wordWidth = this.getRichTextMetrics(part, style, metricCache).width;
-                            charWidth = null;
-                        }
-                    } else if (wordBoundary != null && lastCmd != null) {
-                        let cmd: MsdfRichTextCommand | null = lastCmd;
-                        let totalLen = part.length;
-                        let newLine = false;
-
-                        // 当前 run 放不下时，回溯当前行里已有的命令，尝试把整词一起挪到下一行。
-                        while (cmd) {
-                            if (cmd.width > 0) {
-                                match = wordBoundaryTest.exec(cmd.text);
-                                const textLen = cmd.text.length;
-                                if (match == null) {
-                                    addLine();
-                                    if (isPunctuation && totalLen === 0) {
-                                        if (splitCmd(cmd, textLen - 1)) {
-                                            moveCmds(cmd.next);
-                                        } else if (cmd.x > 0) {
-                                            moveCmds(cmd);
-                                        }
-                                    } else if (cmd.next) {
-                                        moveCmds(cmd.next);
-                                    }
-                                    newLine = true;
-                                    break;
-                                } else if (match.index > 0) {
-                                    if (match.index > textLen - (maxWordLength - totalLen)) {
-                                        addLine();
-                                        if (splitCmd(cmd, match.index)) {
-                                            moveCmds(cmd.next);
-                                        }
-                                        newLine = true;
-                                    }
-                                    break;
-                                } else {
-                                    totalLen += textLen;
-                                    if (totalLen >= maxWordLength) {
-                                        break;
-                                    }
-                                }
-                            }
-
-                            cmd = cmd.prev;
-                        }
-
-                        if (newLine) {
-                            remainWidth = rectWidth - lineX;
-                            if (charWidth != null && wordWidth + charWidth < remainWidth) {
-                                wordWidth += charWidth;
-                                continue;
-                            }
-                        }
-                    } else if (isPunctuation) {
-                        const backup = (emoji && j >= 1 && isLowSurrogate(text.charCodeAt(j - 1))) ? 2 : 1;
-                        if (j - backup > startIndex || lineX > 0) {
-                            j -= backup;
-                            part = text.substring(startIndex, j);
-                            wordWidth = this.getRichTextMetrics(part, style, metricCache).width;
-                            charWidth = null;
-                        }
-                    }
-                }
-
-                if (part.length > 0) {
-                    addCmd(part, style, { width: wordWidth, height: styleMetrics.height });
-                }
-
-                addLine();
-                startIndex = j;
-                remainWidth = rectWidth;
-                wordWidth = italicExtra + styleMetrics.extraWidth;
-
-                if (charWidth != null) {
-                    wordWidth += charWidth;
-                    if (charText.length > 1) {
-                        j++;
-                    }
-                } else if (emoji && isHighSurrogate(text.charCodeAt(j))) {
-                    j++;
-                }
-
-                if (charWidth == null && j < len - 1) {
-                    wordWidth = this.getRichTextMetrics(text.substring(startIndex, j + 1), style, metricCache).width;
-                }
-            }
-
-            addCmd(text.substring(startIndex, len), style);
-        };
-
-        addLine();
+        this.advanceRichTextLine(state);
 
         for (const run of this._runs) {
-            if (!run.text) {
-                continue;
-            }
-
-            lastHeight = this.getRichTextRenderMetrics(run.style, metricCache).height;
-            const splitLines = run.text.split("\n");
-
-            for (let i = 0, n = splitLines.length; i < n; i++) {
-                const lineText = splitLines[i];
-                if (lineText.length > 0) {
-                    if (wordWrap) {
-                        wrapText(lineText, run.style);
-                    } else {
-                        addCmd(lineText, run.style);
-                    }
-                }
-
-                if (i !== n - 1) {
-                    addLine();
-                }
-            }
+            this.appendRichTextRunSegments(state, run, wordWrap);
         }
 
-        addLine(true);
-        // 先完成正常排版，再统一做 ellipsis 裁剪，这样可以复用已有的测量和重建逻辑。
-        this.applyEllipsisToRichTextLines(
-            lines,
-            rectWidth,
-            rectHeight,
-            lastHeight,
-            (text, style) => this.getRichTextMetrics(text, style, metricCache),
-            rebuildLine,
-            getFallbackStyle
-        );
-
-        const measured = this.measureRichTextLines(lines);
-        this._contentWidth = measured.width;
-        this._contentHeight = measured.height;
-        return lines;
+        return this.finalizeRichTextLayout(state);
     }
 
-    private buildRunBatch(cmd: MsdfRichTextCommand, x: number, y: number, layoutCache?: WeakMap<MsdfRichTextStyle, Map<string, MsdfLayout>>, shrinkScale: number = 1): MsdfDrawBatch | null {
+    private resolveRichTextLineOffsetX(line: MsdfRichTextLine, contentBoxWidth: number, shrinkScale: number): number {
+        const lineAlign = line.align || this._defaultAlign;
+        if (lineAlign === "center") {
+            return Math.max((contentBoxWidth - line.width * shrinkScale) * 0.5, 0);
+        }
+
+        if (lineAlign === "right") {
+            return Math.max(contentBoxWidth - line.width * shrinkScale, 0);
+        }
+
+        return 0;
+    }
+
+    private appendMergedBatch(drawBatches: MsdfDrawBatch[], pendingGroup: MsdfDrawBatchGroup | null, batch: MsdfDrawBatch): MsdfDrawBatchGroup {
+        if (pendingGroup && canMergeBatchGroup(pendingGroup, batch)) {
+            mergeBatchGroup(pendingGroup, batch);
+            return pendingGroup;
+        }
+
+        appendBatchGroup(drawBatches, pendingGroup);
+        return createBatchGroup(batch);
+    }
+
+    private appendRichTextLineBatches(
+        drawBatches: MsdfDrawBatch[],
+        pendingGroup: MsdfDrawBatchGroup | null,
+        line: MsdfRichTextLine,
+        contentBoxWidth: number,
+        scrollOffsetX: number,
+        scrollOffsetY: number,
+        layoutCache: MsdfRichTextLayoutCache,
+        shrinkScale: number
+    ): MsdfDrawBatchGroup | null {
+        const lineOffsetX = this.resolveRichTextLineOffsetX(line, contentBoxWidth, shrinkScale);
+        let cmd = line.cmd;
+
+        while (cmd) {
+            const batch = this.buildRunBatch(
+                cmd,
+                lineOffsetX + cmd.x * shrinkScale - scrollOffsetX,
+                (line.y + cmd.y) * shrinkScale - scrollOffsetY,
+                layoutCache,
+                shrinkScale
+            );
+            if (batch) {
+                pendingGroup = this.appendMergedBatch(drawBatches, pendingGroup, batch);
+            }
+            cmd = cmd.next;
+        }
+
+        return pendingGroup;
+    }
+
+    private buildRichTextDrawBatches(lines: MsdfRichTextLine[], shrinkScale: number): MsdfDrawBatch[] {
+        const contentBoxWidth = this._layoutWidth >= 0 ? this._layoutWidth : this._contentWidth;
+        const drawBatches: MsdfDrawBatch[] = [];
+        // 富文本里同样的“文本片段 + 样式”组合可能重复出现。
+        // 先缓存每个 run 的布局，再把可合并的 run 拼成更大的 GPU batch。
+        const layoutCache: MsdfRichTextLayoutCache = new WeakMap();
+        const scrollOffsetX = this.getScrollOffsetX();
+        const scrollOffsetY = this.getScrollOffsetY();
+        let pendingGroup: MsdfDrawBatchGroup | null = null;
+
+        for (const line of lines) {
+            pendingGroup = this.appendRichTextLineBatches(
+                drawBatches,
+                pendingGroup,
+                line,
+                contentBoxWidth,
+                scrollOffsetX,
+                scrollOffsetY,
+                layoutCache,
+                shrinkScale
+            );
+        }
+
+        appendBatchGroup(drawBatches, pendingGroup);
+        return drawBatches;
+    }
+
+    private createRichTextBatchStyleData(layout: MsdfLayout, style: MsdfRichTextStyle, vertexCount: number): MsdfBatchStyleData {
+        const flags = this.getEffectFlagsForStyle(style.outlineWidth, style.outlineColor);
+
+        return {
+            fillColors: createLayoutColorArray(layout, style.textColor, style.underlineColor, style.strikethroughColor),
+            outlineColors: createLayoutColorArray(layout, style.outlineColor, style.underlineColor, style.strikethroughColor),
+            glowColors: createVertexColorArray(this._glowColor, vertexCount),
+            shadowColors: createVertexColorArray(this._shadowColor, vertexCount),
+            packedParamsA: createPackedParamsAArray(style.outlineWidth, this._glowSize, this._shadowBlur, vertexCount),
+            packedParamsB: createPackedParamsBArray(this._shadowOffsetX, this._shadowOffsetY, flags, vertexCount)
+        };
+    }
+
+    private transformRunVertices(layout: MsdfLayout, style: MsdfRichTextStyle, x: number, y: number, shrinkScale: number): Float32Array {
+        // 把 run 的局部布局映射到最终顶点：
+        // 先应用 bold/italic/shrink，再叠加行内位置偏移。
+        const baseHeight = Math.max(layout.height, this.font.getLineHeight(style.fontSize));
+        const italicOffset = styleSkewExtra(baseHeight, style) * shrinkScale;
+        const scaleX = styleScaleX(style);
+        const skewX = style.italic ? Math.tan(ITALIC_SKEW_DEGREES * Math.PI / 180) : 0;
+        const vertices = new Float32Array(layout.vertices.length);
+
+        for (let i = 0; i < layout.vertices.length; i += 2) {
+            const localX = layout.vertices[i] * scaleX * shrinkScale;
+            const localY = layout.vertices[i + 1] * shrinkScale;
+            vertices[i] = x + localX + (style.italic ? italicOffset - skewX * localY : 0);
+            vertices[i + 1] = y + localY;
+        }
+
+        return vertices;
+    }
+
+    private getRichTextCommandLayout(cmd: MsdfRichTextCommand, layoutCache?: MsdfRichTextLayoutCache): MsdfLayout {
         const style = cmd.style;
         let styleLayouts = layoutCache?.get(style);
         if (!styleLayouts && layoutCache) {
@@ -2381,48 +2738,32 @@ export class MsdfTextSprite extends Laya.Sprite {
             styleLayouts?.set(cmd.text, layout);
         }
 
+        return layout;
+    }
+
+    private buildRunBatch(cmd: MsdfRichTextCommand, x: number, y: number, layoutCache?: MsdfRichTextLayoutCache, shrinkScale: number = 1): MsdfDrawBatch | null {
+        const style = cmd.style;
+        const layout = this.getRichTextCommandLayout(cmd, layoutCache);
         if (layout.indices.length === 0) {
             return null;
         }
 
         // run 级别的形变都在这里完成：bold 拉宽 X，italic 按 Y 倾斜，
         // shrink 统一缩放，x/y 再把这个 run 放到最终行盒中的目标位置。
-        const baseHeight = Math.max(layout.height, this.font.getLineHeight(style.fontSize));
-        const italicOffset = styleSkewExtra(baseHeight, style) * shrinkScale;
-        const scaleX = styleScaleX(style);
-        const skewX = style.italic ? Math.tan(ITALIC_SKEW_DEGREES * Math.PI / 180) : 0;
-        const vertices = new Float32Array(layout.vertices.length);
+        const vertices = this.transformRunVertices(layout, style, x, y, shrinkScale);
         const vertexCount = vertices.length >> 1;
-        const flags = effectFlags(
-            style.outlineWidth,
-            style.outlineColor,
-            this._glowSize,
-            this._glowColor,
-            this._shadowOffsetX,
-            this._shadowOffsetY,
-            this._shadowBlur,
-            this._shadowColor
-        );
-
-        // 把 run 的局部布局映射到最终顶点：
-        // 先应用 bold/italic/shrink，再叠加行内位置偏移。
-        for (let i = 0; i < layout.vertices.length; i += 2) {
-            const localX = layout.vertices[i] * scaleX * shrinkScale;
-            const localY = layout.vertices[i + 1] * shrinkScale;
-            vertices[i] = x + localX + (style.italic ? italicOffset - skewX * localY : 0);
-            vertices[i + 1] = y + localY;
-        }
+        const styleData = this.createRichTextBatchStyleData(layout, style, vertexCount);
 
         return {
             vertices,
             uvs: layout.uvs,
             indices: layout.indices,
-            fillColors: createLayoutColorArray(layout, style.textColor, style.underlineColor, style.strikethroughColor),
-            outlineColors: createLayoutColorArray(layout, style.outlineColor, style.underlineColor, style.strikethroughColor),
-            glowColors: createVertexColorArray(this._glowColor, vertexCount),
-            shadowColors: createVertexColorArray(this._shadowColor, vertexCount),
-            packedParamsA: createPackedParamsAArray(style.outlineWidth, this._glowSize, this._shadowBlur, vertexCount),
-            packedParamsB: createPackedParamsBArray(this._shadowOffsetX, this._shadowOffsetY, flags, vertexCount)
+            fillColors: styleData.fillColors,
+            outlineColors: styleData.outlineColors,
+            glowColors: styleData.glowColors,
+            shadowColors: styleData.shadowColors,
+            packedParamsA: styleData.packedParamsA,
+            packedParamsB: styleData.packedParamsB
         };
     }
 }

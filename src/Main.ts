@@ -14,11 +14,28 @@ const PANEL_Y = 24;
 const PANEL_WIDTH = 1104;
 const PANEL_HEIGHT = 760;
 const CONTENT_PADDING = 24;
-const HEADER_HEIGHT = 78;
-const GRID_TOP = 124;
+const HEADER_HEIGHT = 120;
+const GROUP_HEADER_HEIGHT = 58;
+const GROUP_GAP = 28;
+const GROUP_CONTENT_GAP = 12;
 const COMPARE_TOP = 88;
 const COMPARE_GAP = 16;
 const SECTION_HEIGHT = 108;
+
+type MainCompareCase = {
+    id: string;
+    title: string;
+    note: string;
+    buildMsdf: () => MsdfLabel;
+    buildNative: () => Laya.Label;
+};
+
+type MainCompareGroup = {
+    id: string;
+    title: string;
+    note: string;
+    cases: MainCompareCase[];
+};
 
 @regClass()
 export class Main extends Laya.Script {
@@ -27,308 +44,459 @@ export class Main extends Laya.Script {
         Laya.stage.bgColor = "#0b1220";
         MsdfLabel.registerFont("demo-msdf", MSDF_ATLAS_URL, MSDF_JSON_URL, MSDF_SHADER_URL);
 
+        const groups = this.createRegressionGroups();
         const panel = this.createPanel();
         this.owner.addChild(panel);
 
-        const cases = [
-            {
-                title: "font + basic",
-                note: "验证 font 属性映射、字号、描边、阴影和基础测量。",
-                buildMsdf: () => {
-                    const label = this.createMsdfLabel("font 属性已接入 demo-msdf，描边和投影同时开启。");
-                    label.font = "demo-msdf";
-                    label.fontSize = 34;
-                    label.stroke = 2;
-                    label.wordWrap = true;
-                    label.strokeColor = "#1d9c7c";
-                    label.shadowColor = "#03111fcc";
-                    label.shadowOffsetX = 3;
-                    label.shadowOffsetY = 3;
-                    label.width = 480;
-                    return label;
-                },
-                buildNative: () => {
-                    const label = this.createNativeLabel("Laya.Label 使用 TTF 作为基准参照。");
-                    label.font = NATIVE_FONT_URL;
-                    label.wordWrap = true;
-                    label.fontSize = 34;
-                    label.stroke = 2;
-                    label.width = 480;
-                    label.strokeColor = "#1d9c7c";
-                    return label;
-                }
-            },
-            {
-                title: "decoration colors",
-                note: "验证 underlineColor、strikethroughColor；未设置时应继续跟随主文字颜色。",
-                buildMsdf: () => {
-                    const label = this.createMsdfLabel("装饰线颜色独立");
-                    label.font = "demo-msdf";
-                    label.fontSize = 32;
-                    label.underline = true;
-                    label.underlineColor = "#56d39b";
-                    label.strikethrough = true;
-                    label.strikethroughColor = "#ffb347";
-                    label.stroke = 1.5;
-                    label.strokeColor = "#21406d";
-                    return label;
-                },
-                buildNative: () => {
-                    const label = this.createNativeLabel("装饰线颜色独立");
-                    label.font = NATIVE_FONT_URL;
-                    label.fontSize = 32;
-                    label.underline = true;
-                    label.underlineColor = "#56d39b";
-                    label.strikethrough = true;
-                    label.strikethroughColor = "#ffb347";
-                    label.stroke = 1.5;
-                    label.strokeColor = "#21406d";
-                    return label;
-                }
-            },
-            {
-                title: "maxWidth wrap",
-                note: "不显式设 width，仅靠 maxWidth 触发换行，保留基础换行对齐检查。",
-                buildMsdf: () => {
-                    const label = this.createMsdfLabel("maxWidth=270 时应自动换行，不需要先手动设置组件宽度。");
-                    label.font = "demo-msdf";
-                    label.fontSize = 28;
-                    label.maxWidth = 270;
-                    label.leading = 8;
-                    label.bgColor = "#16263a";
-                    label.borderColor = "#35506d";
-                    label.padding = "10,12,10,12";
-                    return label;
-                },
-                buildNative: () => {
-                    const label = this.createNativeLabel("maxWidth=270 时应自动换行，不需要先手动设置组件宽度。");
-                    label.font = NATIVE_FONT_URL;
-                    label.fontSize = 28;
-                    label.maxWidth = 270;
-                    label.leading = 8;
-                    label.bgColor = "#16263a";
-                    label.borderColor = "#35506d";
-                    label.padding = "10,12,10,12";
-                    return label;
-                }
-            },
-            {
-                title: "fitContent yes",
-                note: "内容驱动宽高，忽略外部 size 写入。",
-                buildMsdf: () => {
-                    const label = this.createMsdfLabel("fitContent = yes");
-                    label.font = "demo-msdf";
-                    label.fontSize = 30;
-                    label.fitContent = "yes";
-                    label.padding = "12,16,12,16";
-                    label.bgColor = "#163247";
-                    label.borderColor = "#2d728f";
-                    label.stroke = 1.5;
-                    label.strokeColor = "#63d1ae";
-                    label.size(120, 40);
-                    return label;
-                },
-                buildNative: () => {
-                    const label = this.createNativeLabel("fitContent = yes");
-                    label.font = NATIVE_FONT_URL;
-                    label.fontSize = 30;
-                    label.fitContent = "yes";
-                    label.padding = "12,16,12,16";
-                    label.bgColor = "#163247";
-                    label.borderColor = "#2d728f";
-                    label.stroke = 1.5;
-                    label.strokeColor = "#63d1ae";
-                    label.size(120, 40);
-                    return label;
-                }
-            },
-            {
-                title: "overflow hidden",
-                note: "固定宽高后裁剪溢出内容。",
-                buildMsdf: () => {
-                    const label = this.createMsdfLabel("overflow=hidden：超出的内容应该直接被裁掉，不能继续画到卡片外。");
-                    label.font = "demo-msdf";
-                    label.fontSize = 28;
-                    label.wordWrap = true;
-                    label.overflow = "hidden";
-                    label.size(290, 78);
-                    label.padding = "10,12,10,12";
-                    label.bgColor = "#16263a";
-                    label.borderColor = "#35506d";
-                    return label;
-                },
-                buildNative: () => {
-                    const label = this.createNativeLabel("overflow=hidden：超出的内容应该直接被裁掉，不能继续画到卡片外。");
-                    label.font = NATIVE_FONT_URL;
-                    label.fontSize = 28;
-                    label.wordWrap = true;
-                    label.overflow = "hidden";
-                    label.size(290, 78);
-                    label.padding = "10,12,10,12";
-                    label.bgColor = "#16263a";
-                    label.borderColor = "#35506d";
-                    return label;
-                }
-            },
-            {
-                title: "overflow ellipsis",
-                note: "固定宽高后省略最后可见行。",
-                buildMsdf: () => {
-                    const label = this.createMsdfLabel("overflow=ellipsis：文本过长时，最后应该以省略号收尾，而不是直接穿出边界。");
-                    label.font = "demo-msdf";
-                    label.fontSize = 28;
-                    label.overflow = "ellipsis";
-                    label.size(300, 84);
-                    label.padding = "10,12,10,12";
-                    label.bgColor = "#16263a";
-                    label.borderColor = "#35506d";
-                    return label;
-                },
-                buildNative: () => {
-                    const label = this.createNativeLabel("overflow=ellipsis：文本过长时，最后应该以省略号收尾，而不是直接穿出边界。");
-                    label.font = NATIVE_FONT_URL;
-                    label.fontSize = 28;
-                    label.overflow = "ellipsis";
-                    label.size(300, 84);
-                    label.padding = "10,12,10,12";
-                    label.bgColor = "#16263a";
-                    label.borderColor = "#35506d";
-                    return label;
-                }
-            },
-            {
-                title: "overflow shrink",
-                note: "固定宽高后整体缩小文本，以适应内容区域。",
-                buildMsdf: () => {
-                    const label = this.createMsdfLabel("overflow=shrink 时，文本应整体缩小并保持完整显示。overflow=shrink 时，文本应整体缩小并保持完整显示。");
-                    label.font = "demo-msdf";
-                    label.fontSize = 30;
-                    label.wordWrap = true;
-                    label.overflow = "shrink";
-                    label.size(296, 84);
-                    label.padding = "10,12,10,12";
-                    label.bgColor = "#16263a";
-                    label.borderColor = "#d33408";
-                    return label;
-                },
-                buildNative: () => {
-                    const label = this.createNativeLabel("overflow=shrink 时，文本应整体缩小并保持完整显示。");
-                    label.font = NATIVE_FONT_URL;
-                    label.fontSize = 30;
-                    label.wordWrap = true;
-                    label.overflow = "shrink";
-                    label.size(296, 84);
-                    label.padding = "10,12,10,12";
-                    label.bgColor = "#16263a";
-                    label.borderColor = "#35506d";
-                    return label;
-                }
-            },
-            {
-                title: "template + escape",
-                note: "验证 templateVars、setVar 和 \\n 转义字符解析。",
-                buildMsdf: () => {
-                    const label = this.createMsdfLabel("当前波次 {wave=0}\\n当前分数 {score=0}");
-                    label.font = "demo-msdf";
-                    label.fontSize = 26;
-                    label.templateVars = true;
-                    label.setVar("wave", 7);
-                    label.setVar("score", 1280);
-                    label.padding = "10,12,10,12";
-                    label.bgColor = "#16263a";
-                    label.borderColor = "#35506d";
-                    return label;
-                },
-                buildNative: () => {
-                    const label = this.createNativeLabel("当前波次 {wave=0}\\n当前分数 {score=0}");
-                    label.font = NATIVE_FONT_URL;
-                    label.fontSize = 26;
-                    label.templateVars = true;
-                    label.setVar("wave", 7);
-                    label.setVar("score", 1280);
-                    label.padding = "10,12,10,12";
-                    label.bgColor = "#16263a";
-                    label.borderColor = "#35506d";
-                    return label;
-                }
-            },
-            {
-                title: "scroll via textField",
-                note: "固定区域后设置 scrollY，比较 textField 驱动的滚动窗口结果。",
-                buildMsdf: () => {
-                    const label = this.createMsdfLabel("scroll 模式下，内容区域应该固定，scrollY 改变后只移动视窗内的文本。这里故意放三行内容用于比对。");
-                    label.font = "demo-msdf";
-                    label.fontSize = 26;
-                    label.wordWrap = true;
-                    label.overflow = "scroll";
-                    label.size(296, 84);
-                    label.padding = "10,12,10,12";
-                    label.bgColor = "#16263a";
-                    label.borderColor = "#35506d";
-                    label.textField.scrollY = 34;
-                    return label;
-                },
-                buildNative: () => {
-                    const label = this.createNativeLabel("scroll 模式下，内容区域应该固定，scrollY 改变后只移动视窗内的文本。这里故意放三行内容用于比对。");
-                    label.font = NATIVE_FONT_URL;
-                    label.fontSize = 26;
-                    label.wordWrap = true;
-                    label.overflow = "scroll";
-                    label.size(296, 84);
-                    label.padding = "10,12,10,12";
-                    label.bgColor = "#16263a";
-                    label.borderColor = "#35506d";
-                    label.textField.scrollY = 34;
-                    return label;
-                }
-            }
-        ];
-
-        const header = this.createHeader(panel.width - CONTENT_PADDING * 2);
+        const header = this.createHeader(panel.width - CONTENT_PADDING * 2, groups);
         header.pos(CONTENT_PADDING, CONTENT_PADDING);
         panel.addChild(header);
 
-        const grid = new Laya.Box();
-        grid.pos(CONTENT_PADDING, GRID_TOP);
-        panel.addChild(grid);
+        const content = this.createRegressionContent(groups);
+        content.pos(CONTENT_PADDING, header.y + header.height + 18);
+        panel.addChild(content);
 
-        cases.forEach((item, index) => {
-            const card = this.createCaseCard(item.title, item.note);
-            card.pos((index % 2) * (CARD_WIDTH + CARD_GAP), Math.floor(index / 2) * (CARD_HEIGHT + CARD_GAP));
-            grid.addChild(card);
-
-            const nativeTag = this.createTag("Laya", "#3a2317", "#ffbe78");
-            nativeTag.pos(18, COMPARE_TOP);
-            card.addChild(nativeTag);
-
-            const nativeLabel = item.buildNative();
-            nativeLabel.pos(18, COMPARE_TOP + 34);
-            card.addChild(nativeLabel);
-
-            const msdfTag = this.createTag("MSDF", "#17384a", "#53c7ff");
-            msdfTag.pos(18, COMPARE_TOP + SECTION_HEIGHT + COMPARE_GAP);
-            card.addChild(msdfTag);
-
-            const msdfLabel = item.buildMsdf();
-            msdfLabel.pos(18, COMPARE_TOP + SECTION_HEIGHT + COMPARE_GAP + 34);
-            card.addChild(msdfLabel);
-        });
-
-        const rowCount = Math.ceil(cases.length / 2);
-        const gridHeight = rowCount > 0 ? rowCount * CARD_HEIGHT + (rowCount - 1) * CARD_GAP : 0;
-        grid.size(CARD_WIDTH * 2 + CARD_GAP, gridHeight);
         panel.refresh();
     }
 
-    private createHeader(width: number): Laya.Box {
+    private createRegressionGroups(): MainCompareGroup[] {
+        return [
+            {
+                id: "A",
+                title: "样式与基础",
+                note: "优先确认字体映射、装饰线颜色和模板文本解析。",
+                cases: [
+                    {
+                        id: "A1",
+                        title: "font + basic",
+                        note: "验证 font 属性映射、字号、描边、阴影和基础测量。",
+                        buildMsdf: () => {
+                            const label = this.createMsdfLabel("font 属性已接入 demo-msdf，描边和投影同时开启。");
+                            label.font = "demo-msdf";
+                            label.fontSize = 34;
+                            label.stroke = 2;
+                            label.wordWrap = true;
+                            label.strokeColor = "#1d9c7c";
+                            label.shadowColor = "#03111fcc";
+                            label.shadowOffsetX = 3;
+                            label.shadowOffsetY = 3;
+                            label.width = 480;
+                            return label;
+                        },
+                        buildNative: () => {
+                            const label = this.createNativeLabel("Laya.Label 使用 TTF 作为基准参照。");
+                            label.font = NATIVE_FONT_URL;
+                            label.wordWrap = true;
+                            label.fontSize = 34;
+                            label.stroke = 2;
+                            label.width = 480;
+                            label.strokeColor = "#1d9c7c";
+                            return label;
+                        }
+                    },
+                    {
+                        id: "A2",
+                        title: "decoration colors",
+                        note: "验证 underlineColor、strikethroughColor；未设置时应继续跟随主文字颜色。",
+                        buildMsdf: () => {
+                            const label = this.createMsdfLabel("装饰线颜色独立");
+                            label.font = "demo-msdf";
+                            label.fontSize = 32;
+                            label.underline = true;
+                            label.underlineColor = "#56d39b";
+                            label.strikethrough = true;
+                            label.strikethroughColor = "#ffb347";
+                            label.stroke = 1.5;
+                            label.strokeColor = "#21406d";
+                            return label;
+                        },
+                        buildNative: () => {
+                            const label = this.createNativeLabel("装饰线颜色独立");
+                            label.font = NATIVE_FONT_URL;
+                            label.fontSize = 32;
+                            label.underline = true;
+                            label.underlineColor = "#56d39b";
+                            label.strikethrough = true;
+                            label.strikethroughColor = "#ffb347";
+                            label.stroke = 1.5;
+                            label.strokeColor = "#21406d";
+                            return label;
+                        }
+                    },
+                    {
+                        id: "A3",
+                        title: "template + escape",
+                        note: "验证 templateVars、setVar 和 \\n 转义字符解析。",
+                        buildMsdf: () => {
+                            const label = this.createMsdfLabel("当前波次 {wave=0}\\n当前分数 {score=0}");
+                            label.font = "demo-msdf";
+                            label.fontSize = 26;
+                            label.templateVars = true;
+                            label.setVar("wave", 7);
+                            label.setVar("score", 1280);
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            return label;
+                        },
+                        buildNative: () => {
+                            const label = this.createNativeLabel("当前波次 {wave=0}\\n当前分数 {score=0}");
+                            label.font = NATIVE_FONT_URL;
+                            label.fontSize = 26;
+                            label.templateVars = true;
+                            label.setVar("wave", 7);
+                            label.setVar("score", 1280);
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            return label;
+                        }
+                    }
+                ]
+            },
+            {
+                id: "B",
+                title: "布局与尺寸",
+                note: "重点检查 maxWidth 触发换行和 fitContent 的尺寸回写。",
+                cases: [
+                    {
+                        id: "B1",
+                        title: "maxWidth wrap",
+                        note: "不显式设 width，仅靠 maxWidth 触发换行，保留基础换行对齐检查。",
+                        buildMsdf: () => {
+                            const label = this.createMsdfLabel("maxWidth=270 时应自动换行，不需要先手动设置组件宽度。");
+                            label.font = "demo-msdf";
+                            label.fontSize = 28;
+                            label.maxWidth = 270;
+                            label.leading = 8;
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            label.padding = "10,12,10,12";
+                            return label;
+                        },
+                        buildNative: () => {
+                            const label = this.createNativeLabel("maxWidth=270 时应自动换行，不需要先手动设置组件宽度。");
+                            label.font = NATIVE_FONT_URL;
+                            label.fontSize = 28;
+                            label.maxWidth = 270;
+                            label.leading = 8;
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            label.padding = "10,12,10,12";
+                            return label;
+                        }
+                    },
+                    {
+                        id: "B2",
+                        title: "fitContent yes",
+                        note: "内容驱动宽高，忽略外部 size 写入。",
+                        buildMsdf: () => {
+                            const label = this.createMsdfLabel("fitContent = yes");
+                            label.font = "demo-msdf";
+                            label.fontSize = 30;
+                            label.fitContent = "yes";
+                            label.padding = "12,16,12,16";
+                            label.bgColor = "#163247";
+                            label.borderColor = "#2d728f";
+                            label.stroke = 1.5;
+                            label.strokeColor = "#63d1ae";
+                            label.size(120, 40);
+                            return label;
+                        },
+                        buildNative: () => {
+                            const label = this.createNativeLabel("fitContent = yes");
+                            label.font = NATIVE_FONT_URL;
+                            label.fontSize = 30;
+                            label.fitContent = "yes";
+                            label.padding = "12,16,12,16";
+                            label.bgColor = "#163247";
+                            label.borderColor = "#2d728f";
+                            label.stroke = 1.5;
+                            label.strokeColor = "#63d1ae";
+                            label.size(120, 40);
+                            return label;
+                        }
+                    }
+                ]
+            },
+            {
+                id: "C",
+                title: "Overflow 与视口",
+                note: "集中看 hidden、ellipsis、shrink、scroll 这些最容易产生行为差异的场景。",
+                cases: [
+                    {
+                        id: "C1",
+                        title: "overflow hidden",
+                        note: "固定宽高后裁剪溢出内容。",
+                        buildMsdf: () => {
+                            const label = this.createMsdfLabel("overflow=hidden：超出的内容应该直接被裁掉，不能继续画到卡片外。");
+                            label.font = "demo-msdf";
+                            label.fontSize = 28;
+                            label.wordWrap = true;
+                            label.overflow = "hidden";
+                            label.size(290, 78);
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            return label;
+                        },
+                        buildNative: () => {
+                            const label = this.createNativeLabel("overflow=hidden：超出的内容应该直接被裁掉，不能继续画到卡片外。");
+                            label.font = NATIVE_FONT_URL;
+                            label.fontSize = 28;
+                            label.wordWrap = true;
+                            label.overflow = "hidden";
+                            label.size(290, 78);
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            return label;
+                        }
+                    },
+                    {
+                        id: "C2",
+                        title: "overflow ellipsis",
+                        note: "固定宽高后省略最后可见行。",
+                        buildMsdf: () => {
+                            const label = this.createMsdfLabel("overflow=ellipsis：文本过长时，最后应该以省略号收尾，而不是直接穿出边界。");
+                            label.font = "demo-msdf";
+                            label.fontSize = 28;
+                            label.overflow = "ellipsis";
+                            label.size(300, 84);
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            return label;
+                        },
+                        buildNative: () => {
+                            const label = this.createNativeLabel("overflow=ellipsis：文本过长时，最后应该以省略号收尾，而不是直接穿出边界。");
+                            label.font = NATIVE_FONT_URL;
+                            label.fontSize = 28;
+                            label.overflow = "ellipsis";
+                            label.size(300, 84);
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            return label;
+                        }
+                    },
+                    {
+                        id: "C3",
+                        title: "overflow shrink",
+                        note: "固定宽高后整体缩小文本，以适应内容区域。",
+                        buildMsdf: () => {
+                            const label = this.createMsdfLabel("overflow=shrink 时，文本应整体缩小并保持完整显示。overflow=shrink 时，文本应整体缩小并保持完整显示。");
+                            label.font = "demo-msdf";
+                            label.fontSize = 30;
+                            label.wordWrap = true;
+                            label.overflow = "shrink";
+                            label.size(296, 84);
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#d33408";
+                            return label;
+                        },
+                        buildNative: () => {
+                            const label = this.createNativeLabel("overflow=shrink 时，文本应整体缩小并保持完整显示。");
+                            label.font = NATIVE_FONT_URL;
+                            label.fontSize = 30;
+                            label.wordWrap = true;
+                            label.overflow = "shrink";
+                            label.size(296, 84);
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            return label;
+                        }
+                    },
+                    {
+                        id: "C4",
+                        title: "scroll via textField",
+                        note: "固定区域后设置 scrollY，比较 textField 驱动的滚动窗口结果。",
+                        buildMsdf: () => {
+                            const label = this.createMsdfLabel("scroll 模式下，内容区域应该固定，scrollY 改变后只移动视窗内的文本。这里故意放三行内容用于比对。");
+                            label.font = "demo-msdf";
+                            label.fontSize = 26;
+                            label.wordWrap = true;
+                            label.overflow = "scroll";
+                            label.size(296, 84);
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            label.textField.scrollY = 34;
+                            return label;
+                        },
+                        buildNative: () => {
+                            const label = this.createNativeLabel("scroll 模式下，内容区域应该固定，scrollY 改变后只移动视窗内的文本。这里故意放三行内容用于比对。");
+                            label.font = NATIVE_FONT_URL;
+                            label.fontSize = 26;
+                            label.wordWrap = true;
+                            label.overflow = "scroll";
+                            label.size(296, 84);
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            label.textField.scrollY = 34;
+                            return label;
+                        }
+                    }
+                ]
+            },
+            {
+                id: "D",
+                title: "语法混排",
+                note: "补充 UBB 和 HTML 的富文本场景，重点看嵌套样式、段落、列表和换行解析。",
+                cases: [
+                    {
+                        id: "D1",
+                        title: "ubb rich styles",
+                        note: "验证 UBB 的 color、size、b、i、u 嵌套，以及多行内容的排版。",
+                        buildMsdf: () => {
+                            const label = this.createMsdfLabel(this.createUbbSampleText());
+                            label.font = "demo-msdf";
+                            label.fontSize = 24;
+                            label.ubb = true;
+                            label.wordWrap = true;
+                            label.width = 300;
+                            label.leading = 7;
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            label.stroke = 1.5;
+                            label.strokeColor = "#1b4a69";
+                            label.shadowColor = "#020b14cc";
+                            label.shadowOffsetX = 2;
+                            label.shadowOffsetY = 2;
+                            return label;
+                        },
+                        buildNative: () => {
+                            const label = this.createNativeLabel(this.createUbbSampleText());
+                            label.font = NATIVE_FONT_URL;
+                            label.fontSize = 24;
+                            label.ubb = true;
+                            label.wordWrap = true;
+                            label.width = 300;
+                            label.leading = 7;
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            label.stroke = 1.5;
+                            label.strokeColor = "#1b4a69";
+                            return label;
+                        }
+                    },
+                    {
+                        id: "D2",
+                        title: "html rich layout",
+                        note: "验证 HTML 的 b、i、u、div、p、span、li、br 和空格实体解析。",
+                        buildMsdf: () => {
+                            const label = this.createMsdfLabel(this.createHtmlSampleText());
+                            label.font = "demo-msdf";
+                            label.fontSize = 24;
+                            label.html = true;
+                            label.wordWrap = true;
+                            label.width = 300;
+                            label.leading = 6;
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            label.stroke = 1.5;
+                            label.strokeColor = "#36597b";
+                            label.shadowColor = "#04111acc";
+                            label.shadowOffsetX = 2;
+                            label.shadowOffsetY = 2;
+                            return label;
+                        },
+                        buildNative: () => {
+                            const label = this.createNativeLabel(this.createHtmlSampleText());
+                            label.font = NATIVE_FONT_URL;
+                            label.fontSize = 24;
+                            label.html = true;
+                            label.wordWrap = true;
+                            label.width = 300;
+                            label.leading = 6;
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            label.stroke = 1.5;
+                            label.strokeColor = "#36597b";
+                            return label;
+                        }
+                    }
+                ]
+            }
+        ];
+    }
+
+    private createRegressionContent(groups: MainCompareGroup[]): Laya.Box {
+        const content = new Laya.Box();
+        let offsetY = 0;
+
+        for (const group of groups) {
+            const section = this.createRegressionSection(group);
+            section.pos(0, offsetY);
+            content.addChild(section);
+            offsetY += section.height + GROUP_GAP;
+        }
+
+        content.size(CARD_WIDTH * 2 + CARD_GAP, Math.max(0, offsetY - GROUP_GAP));
+        return content;
+    }
+
+    private createRegressionSection(group: MainCompareGroup): Laya.Box {
+        const section = new Laya.Box();
+        const groupHeader = this.createGroupHeader(group);
+        section.addChild(groupHeader);
+
+        const cardsTop = groupHeader.height + GROUP_CONTENT_GAP;
+        group.cases.forEach((item, index) => {
+            const card = this.createComparisonCard(item);
+            card.pos((index % 2) * (CARD_WIDTH + CARD_GAP), cardsTop + Math.floor(index / 2) * (CARD_HEIGHT + CARD_GAP));
+            section.addChild(card);
+        });
+
+        const rowCount = Math.ceil(group.cases.length / 2);
+        const gridHeight = rowCount > 0 ? rowCount * CARD_HEIGHT + (rowCount - 1) * CARD_GAP : 0;
+        section.size(CARD_WIDTH * 2 + CARD_GAP, cardsTop + gridHeight);
+        return section;
+    }
+
+    private createComparisonCard(item: MainCompareCase): Laya.Sprite {
+        const card = this.createCaseCard(item.id, item.title, item.note);
+
+        const nativeTag = this.createTag("Laya", "#3a2317", "#ffbe78");
+        nativeTag.pos(18, COMPARE_TOP);
+        card.addChild(nativeTag);
+
+        const nativeLabel = item.buildNative();
+        nativeLabel.pos(18, COMPARE_TOP + 34);
+        card.addChild(nativeLabel);
+
+        const msdfTag = this.createTag("MSDF", "#17384a", "#53c7ff");
+        msdfTag.pos(18, COMPARE_TOP + SECTION_HEIGHT + COMPARE_GAP);
+        card.addChild(msdfTag);
+
+        const msdfLabel = item.buildMsdf();
+        msdfLabel.pos(18, COMPARE_TOP + SECTION_HEIGHT + COMPARE_GAP + 34);
+        card.addChild(msdfLabel);
+
+        return card;
+    }
+
+    private createHeader(width: number, groups: MainCompareGroup[]): Laya.Box {
         const box = new Laya.Box();
         box.size(width, HEADER_HEIGHT);
 
-        const title = new Laya.Label();
-        title.font = NATIVE_FONT_URL;
+        const title = new MsdfLabel();
         title.fontSize = 36;
-        title.color = "#f8e7a4";
-        title.text = "MsdfLabel / Laya.Label 对齐测试";
+        title.color = "#000000";
+        title.text = "MsdfLabel / Laya.Label 手工回归入口";
+        title.font = "demo-msdf";
+        title.stroke = 2;
+        title.strokeColor = "#fff200";
+        title.shadowColor = "#fc0000";
+        title.shadowOffsetX = 3;
+        title.shadowOffsetY = 3;
         title.pos(0, 0);
         box.addChild(title);
 
@@ -339,14 +507,60 @@ export class Main extends Laya.Script {
         note.width = width;
         note.leading = 4;
         note.wordWrap = true;
-        note.text = "示例已收敛为关键对齐项。每张卡片按 Laya 在上、MSDF 在下排列，Panel 仅保留垂直滚动。";
+        note.text = "入口按组组织关键回归场景。每张卡片保持 Laya 在上、MSDF 在下，优先观察对齐、换行、overflow 裁剪、shrink、scroll 和 template 解析。";
         note.pos(2, 48);
         box.addChild(note);
+
+        const summary = new Laya.Label();
+        summary.font = NATIVE_FONT_URL;
+        summary.fontSize = 18;
+        summary.color = "#59c1ff";
+        summary.width = width;
+        summary.leading = 4;
+        summary.wordWrap = true;
+        summary.text = this.buildHeaderSummary(groups);
+        summary.pos(2, 90);
+        box.addChild(summary);
 
         return box;
     }
 
-    private createCaseCard(title: string, note: string): Laya.Sprite {
+    private buildHeaderSummary(groups: MainCompareGroup[]): string {
+        return groups.map(group => `${group.id} ${group.title} (${group.cases.length})`).join("  |  ");
+    }
+
+    private createGroupHeader(group: MainCompareGroup): Laya.Sprite {
+        const box = new Laya.Sprite();
+        box.size(CARD_WIDTH * 2 + CARD_GAP, GROUP_HEADER_HEIGHT);
+        box.graphics.drawRect(0, 0, box.width, box.height, "#10263c", "#2e5677", 2);
+        box.graphics.drawLine(0, box.height - 1, box.width, box.height - 1, "#4b88b8", 1);
+
+        const titleLabel = new Laya.Label();
+        titleLabel.font = NATIVE_FONT_URL;
+        titleLabel.fontSize = 24;
+        titleLabel.color = "#d8e7f5";
+        titleLabel.text = `${group.id} · ${group.title}`;
+        titleLabel.pos(16, 8);
+        box.addChild(titleLabel);
+
+        const noteLabel = new Laya.Label();
+        noteLabel.font = NATIVE_FONT_URL;
+        noteLabel.fontSize = 17;
+        noteLabel.color = "#86a2bd";
+        noteLabel.width = box.width - 160;
+        noteLabel.text = group.note;
+        noteLabel.pos(16, 32);
+        box.addChild(noteLabel);
+
+        const countTagWidth = 84;
+        const countTag = this.createTag(`${group.cases.length} Cases`, "#1b3954", "#61c3ff", countTagWidth);
+        countTag.pos(box.width - countTagWidth - 16, 16);
+        box.addChild(countTag);
+
+        return box;
+    }
+
+    private createCaseCard(id: string, title: string, note: string): Laya.Sprite {
         const card = new Laya.Sprite();
         card.size(CARD_WIDTH, CARD_HEIGHT);
         card.graphics.drawRect(0, 0, CARD_WIDTH, CARD_HEIGHT, "#111c2b", "#2a425f", 2);
@@ -356,7 +570,7 @@ export class Main extends Laya.Script {
         titleLabel.font = NATIVE_FONT_URL;
         titleLabel.fontSize = 24;
         titleLabel.color = "#d8e7f5";
-        titleLabel.text = title;
+        titleLabel.text = `${id}  ${title}`;
         titleLabel.pos(18, 14);
         card.addChild(titleLabel);
 
@@ -377,9 +591,9 @@ export class Main extends Laya.Script {
         return card;
     }
 
-    private createTag(text: string, fillColor: string, borderColor: string): Laya.Sprite {
+    private createTag(text: string, fillColor: string, borderColor: string, width: number = 64): Laya.Sprite {
         const box = new Laya.Sprite();
-        box.graphics.drawRect(0, 0, 64, 24, fillColor, borderColor, 1);
+        box.graphics.drawRect(0, 0, width, 24, fillColor, borderColor, 1);
 
         const label = new Laya.Label();
         label.font = NATIVE_FONT_URL;
@@ -387,11 +601,25 @@ export class Main extends Laya.Script {
         label.color = "#e7f1fb";
         label.align = "center";
         label.valign = "middle";
-        label.size(64, 24);
+        label.size(width, 24);
         label.text = text;
         box.addChild(label);
 
         return box;
+    }
+
+    private createUbbSampleText(): string {
+        return "[size=30][color=#71d7ff][b]首领警报[/b][/color][/size]\n"
+            + "[i][color=#ff9c73]第二形态已激活[/color][/i]\n"
+            + "[u][size=24][color=#ffe082]护盾剩余 37%[/color][/size][/u]\n"
+            + "[color=#9fe29f][b]建议：[/b][/color][size=22]集火核心并保持走位[/size]";
+    }
+
+    private createHtmlSampleText(): string {
+        return "<div><b>任务简报</b></div>"
+            + "<p><i>第一阶段：</i><u>封锁入口</u><br />第二阶段：保持阵型</p>"
+            + "<p><li>前排吸收伤害</li><li>后排集中输出</li></p>"
+            + "<span>剩余时间&nbsp;00:18</span>";
     }
 
     private createMsdfLabel(text: string): MsdfLabel {
