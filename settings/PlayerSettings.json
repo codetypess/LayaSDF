@@ -1,10 +1,12 @@
 {
+  "resolution": {
+    "designWidth": 1334
+  },
   "modules": {
     "laya.ui": true,
     "laya.d3": true
   },
   "splash": {
     "fit": "center"
-  },
-  "stat": true
+  }
 }
