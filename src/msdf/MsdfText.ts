@@ -113,6 +113,7 @@ type MsdfTextOptions = {
     text?: string;
     fontSize?: number;
     letterSpacing?: number;
+    faceDilate?: number;
     textColor?: Laya.Vector4;
     underlineColor?: Laya.Vector4 | null;
     strikethroughColor?: Laya.Vector4 | null;
@@ -292,6 +293,7 @@ const punctuationChars = new Set(Array.from(".,，。、!！；;”’)）]】}�
 const maxWordLength = 20;
 const KERNING_KEY_MULTIPLIER = 0x110000;
 const PACKED_EFFECT_SIZE_MAX = 32;
+const PACKED_FACE_DILATE_MAX = 16;
 const PACKED_SHADOW_OFFSET_SCALE = 4;
 const EFFECT_FLAG_OUTLINE = 1;
 const EFFECT_FLAG_GLOW = 2;
@@ -542,6 +544,15 @@ function packNormalizedByte(value: number, maxValue: number): number {
     return Math.max(0, Math.min(255, Math.round(value / maxValue * 255)));
 }
 
+function packSignedNormalizedByte(value: number, maxValue: number): number {
+    if (maxValue <= 0) {
+        return 0;
+    }
+
+    const normalized = Math.max(-1, Math.min(1, value / maxValue));
+    return Math.round(normalized * 127) & 0xff;
+}
+
 function packSignedByte(value: number): number {
     const rounded = Math.max(-128, Math.min(127, Math.round(value)));
     return rounded & 0xff;
@@ -565,9 +576,9 @@ function effectFlags(outlineWidth: number, outlineColor: Laya.Vector4, glowSize:
     return flags;
 }
 
-function createPackedParamsAArray(outlineWidth: number, glowSize: number, shadowBlur: number, vertexCount: number): Uint32Array {
+function createPackedParamsAArray(outlineWidth: number, glowSize: number, shadowBlur: number, faceDilate: number, vertexCount: number): Uint32Array {
     const values = new Uint32Array(vertexCount);
-    const packed = packParamsAValue(outlineWidth, glowSize, shadowBlur);
+    const packed = packParamsAValue(outlineWidth, glowSize, shadowBlur, faceDilate);
     values.fill(packed);
     return values;
 }
@@ -579,11 +590,12 @@ function createPackedParamsBArray(shadowOffsetX: number, shadowOffsetY: number, 
     return values;
 }
 
-function packParamsAValue(outlineWidth: number, glowSize: number, shadowBlur: number): number {
+function packParamsAValue(outlineWidth: number, glowSize: number, shadowBlur: number, faceDilate: number): number {
     return (
         packNormalizedByte(outlineWidth, PACKED_EFFECT_SIZE_MAX)
         | (packNormalizedByte(glowSize, PACKED_EFFECT_SIZE_MAX) << 8)
         | (packNormalizedByte(shadowBlur, PACKED_EFFECT_SIZE_MAX) << 16)
+        | (packSignedNormalizedByte(faceDilate, PACKED_FACE_DILATE_MAX) << 24)
     ) >>> 0;
 }
 
@@ -1016,6 +1028,7 @@ export class MsdfTextSprite extends Laya.Sprite {
     private _fontSize = 16;
     private _letterSpacing = 0;
     private _lineSpacing = 0;
+    private _faceDilate = 0;
     private _textColor = DEFAULT_TEXT_COLOR.clone();
     private _underlineColor: Laya.Vector4 | null = null;
     private _strikethroughColor: Laya.Vector4 | null = null;
@@ -1073,6 +1086,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         this._fontSize = options.fontSize ?? font?.lineHeight ?? 16;
         this._letterSpacing = options.letterSpacing ?? 0;
         this._lineSpacing = 0;
+        this._faceDilate = options.faceDilate ?? 0;
         this._textColor = options.textColor ?? DEFAULT_TEXT_COLOR.clone();
         this._underlineColor = options.underlineColor ?? null;
         this._strikethroughColor = options.strikethroughColor ?? null;
@@ -1223,6 +1237,16 @@ export class MsdfTextSprite extends Laya.Sprite {
     set textColor(value: Laya.Vector4) {
         this._textColor = value;
         this.refreshAfterPlainTextStyleChange();
+    }
+
+    set faceDilate(value: number) {
+        const next = Number.isFinite(value) ? value : 0;
+        if (this._faceDilate === next) {
+            return;
+        }
+
+        this._faceDilate = next;
+        this.refreshAfterEffectChange();
     }
 
     set underlineColor(value: Laya.Vector4 | null) {
@@ -1479,7 +1503,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         const outlineStrikethroughPacked = packVertexColor(this._strikethroughColor ?? this._outlineColor);
         const glowPacked = packVertexColor(this._glowColor);
         const shadowPacked = packVertexColor(this._shadowColor);
-        const packedParamsAValue = packParamsAValue(this._outlineWidth, this._glowSize, this._shadowBlur);
+        const packedParamsAValue = packParamsAValue(this._outlineWidth, this._glowSize, this._shadowBlur, this._faceDilate);
         const packedParamsBValue = packParamsBValue(this._shadowOffsetX, this._shadowOffsetY, flags);
 
         if (!nextCache.fillColors
@@ -1513,7 +1537,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
 
         if (!nextCache.packedParamsA || nextCache.packedParamsAValue !== packedParamsAValue) {
-            nextCache.packedParamsA = createPackedParamsAArray(this._outlineWidth, this._glowSize, this._shadowBlur, vertexCount);
+            nextCache.packedParamsA = createPackedParamsAArray(this._outlineWidth, this._glowSize, this._shadowBlur, this._faceDilate, vertexCount);
             nextCache.packedParamsAValue = packedParamsAValue;
         }
 
@@ -2690,7 +2714,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             outlineColors: createLayoutColorArray(layout, style.outlineColor, style.underlineColor, style.strikethroughColor),
             glowColors: createVertexColorArray(this._glowColor, vertexCount),
             shadowColors: createVertexColorArray(this._shadowColor, vertexCount),
-            packedParamsA: createPackedParamsAArray(style.outlineWidth, this._glowSize, this._shadowBlur, vertexCount),
+            packedParamsA: createPackedParamsAArray(style.outlineWidth, this._glowSize, this._shadowBlur, this._faceDilate, vertexCount),
             packedParamsB: createPackedParamsBArray(this._shadowOffsetX, this._shadowOffsetY, flags, vertexCount)
         };
     }

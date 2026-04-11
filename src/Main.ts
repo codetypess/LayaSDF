@@ -125,6 +125,70 @@ export class Main extends Laya.Script {
                     },
                     {
                         id: "A3",
+                        title: "faceDilate thicker",
+                        note: "验证 faceDilate < 0 时字形变肥，方便直接观察笔画膨胀。",
+                        buildMsdf: () => {
+                            const label = this.createMsdfLabel("faceDilate < 0 时，笔画会更肥，适合微调字重。");
+                            label.font = "demo-msdf";
+                            label.fontSize = 28;
+                            label.faceDilate = -0.5;
+                            label.wordWrap = true;
+                            label.width = 300;
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            label.stroke = 1;
+                            label.strokeColor = "#21406d";
+                            return label;
+                        },
+                        buildNative: () => {
+                            const label = this.createNativeLabel("原生 Label 无 faceDilate，这里作为常规字重基线。");
+                            label.font = NATIVE_FONT_URL;
+                            label.fontSize = 28;
+                            label.wordWrap = true;
+                            label.width = 300;
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            label.stroke = 1;
+                            label.strokeColor = "#21406d";
+                            return label;
+                        }
+                    },
+                    {
+                        id: "A4",
+                        title: "faceDilate thinner",
+                        note: "验证 faceDilate > 0 时字形变瘦，和上一张负值卡片做正负对照。",
+                        buildMsdf: () => {
+                            const label = this.createMsdfLabel("faceDilate > 0 时，笔画会更瘦，轮廓更收紧。");
+                            label.font = "demo-msdf";
+                            label.fontSize = 28;
+                            label.faceDilate = .5;
+                            label.wordWrap = true;
+                            label.width = 300;
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            label.stroke = 1;
+                            label.strokeColor = "#21406d";
+                            return label;
+                        },
+                        buildNative: () => {
+                            const label = this.createNativeLabel("原生 Label 无 faceDilate，这里作为常规字重基线。");
+                            label.font = NATIVE_FONT_URL;
+                            label.fontSize = 28;
+                            label.wordWrap = true;
+                            label.width = 300;
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            label.stroke = 1;
+                            label.strokeColor = "#21406d";
+                            return label;
+                        }
+                    },
+                    {
+                        id: "A5",
                         title: "template + escape",
                         note: "验证 templateVars、setVar 和 \\n 转义字符解析。",
                         buildMsdf: () => {

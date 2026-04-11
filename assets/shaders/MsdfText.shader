@@ -91,6 +91,7 @@ GLSL Start
     varying vec4 v_msdfPackedParamsB;
 
     const float PACKED_EFFECT_SIZE_MAX = 32.0;
+    const float PACKED_FACE_DILATE_MAX = 16.0;
     const float SHADOW_OFFSET_INV_SCALE = 0.25;
 
     float median3(float r, float g, float b) {
@@ -102,6 +103,15 @@ GLSL Start
         vec2 unitRange = vec2(u_DistanceRange) / u_AtlasSize;
         vec2 screenTexSize = vec2(1.0) / max(fwidth(texcoord), vec2(0.0001));
         return max(0.5 * dot(unitRange, screenTexSize), 1.0);
+    }
+
+    float unpackSignedNormalizedByte(float value, float maxValue) {
+        float raw = floor(value * 255.0 + 0.5);
+        if (raw > 127.0) {
+            raw -= 256.0;
+        }
+
+        return raw / 127.0 * maxValue;
     }
 
     void main() {
@@ -124,15 +134,18 @@ GLSL Start
         float outlineWidth = hasOutline ? v_msdfPackedParamsA.x * PACKED_EFFECT_SIZE_MAX : 0.0;
         float glowSize = hasGlow ? v_msdfPackedParamsA.y * PACKED_EFFECT_SIZE_MAX : 0.0;
         float shadowBlur = hasShadow ? v_msdfPackedParamsA.z * PACKED_EFFECT_SIZE_MAX : 0.0;
+        float faceDilate = unpackSignedNormalizedByte(v_msdfPackedParamsA.w, PACKED_FACE_DILATE_MAX);
         vec2 shadowOffset = v_msdfPackedParamsB.xy * SHADOW_OFFSET_INV_SCALE;
 
-        // fill 是字形本体覆盖率，outline/glow 则由“距离边缘还有多远”推导出来。
-        float fillAlpha = clamp(screenDistance + 0.5, 0.0, 1.0);
-        float strokeAlpha = clamp(screenDistance + outlineWidth + 0.5, 0.0, 1.0);
+        // faceDilate 会统一收缩/膨胀字形轮廓：
+        // 正值更瘦，负值更肥。outline/glow/shadow 都复用同一份轮廓基准。
+        float shapeDistance = screenDistance - faceDilate;
+        float fillAlpha = clamp(shapeDistance + 0.5, 0.0, 1.0);
+        float strokeAlpha = clamp(shapeDistance + outlineWidth + 0.5, 0.0, 1.0);
         float outlineAlpha = max(strokeAlpha - fillAlpha, 0.0);
         float glowAlpha = 0.0;
         if (glowSize > 0.0 && glowColor.a > 0.0) {
-            float outsideDistance = max(-(screenDistance + outlineWidth), 0.0);
+            float outsideDistance = max(-(shapeDistance + outlineWidth), 0.0);
             glowAlpha = (1.0 - smoothstep(0.0, glowSize, outsideDistance)) * (1.0 - strokeAlpha);
         }
 
@@ -143,7 +156,7 @@ GLSL Start
             vec3 shadowMsdf = texture2D(u_spriteTexture, shadowTexcoord).rgb;
             float shadowSd = median3(shadowMsdf.r, shadowMsdf.g, shadowMsdf.b);
             float shadowScreenDistance = screenPxRange(shadowTexcoord) * (shadowSd - 0.5);
-            float shadowShapeDistance = shadowScreenDistance + outlineWidth;
+            float shadowShapeDistance = shadowScreenDistance - faceDilate + outlineWidth;
             shadowAlpha = shadowBlur > 0.0
                 ? smoothstep(-shadowBlur, shadowBlur, shadowShapeDistance)
                 : clamp(shadowShapeDistance + 0.5, 0.0, 1.0);

@@ -109,6 +109,7 @@ export class MsdfLabel extends Laya.UIComponent {
     private _text = "";
     private _fontSize = 56;
     private _letterSpacing = 0;
+    private _faceDilate = 0;
     private _color = "#ffffff";
     private _align = "left";
     private _valign = "top";
@@ -251,6 +252,20 @@ export class MsdfLabel extends Laya.UIComponent {
             return;
         }
         this._letterSpacing = value;
+        this.scheduleRefresh();
+    }
+
+    get faceDilate(): number {
+        return this._faceDilate;
+    }
+
+    set faceDilate(value: number) {
+        const next = Number.isFinite(value) ? value : 0;
+        if (this._faceDilate === next) {
+            return;
+        }
+
+        this._faceDilate = next;
         this.scheduleRefresh();
     }
 
@@ -1186,6 +1201,7 @@ export class MsdfLabel extends Laya.UIComponent {
         this._textSprite.layoutHeight = layout.layoutHeight;
         this._textSprite.wordWrapWidth = layout.wrapWidth;
         this._textSprite.letterSpacing = this._letterSpacing;
+        this._textSprite.faceDilate = this._faceDilate;
         this._textSprite.lineSpacing = this._leading;
         this._textSprite.defaultAlign = this._align;
         this._textSprite.alignItems = this._alignItems;
