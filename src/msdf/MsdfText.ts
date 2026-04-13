@@ -176,9 +176,16 @@ export type MsdfRichTextRun = {
     style: MsdfRichTextStyle;
 };
 
+type MsdfRichTextRunMetadata = {
+    link?: string | null;
+    clickable?: boolean;
+};
+
 type MsdfRichTextCommand = {
     text: string;
     style: MsdfRichTextStyle;
+    link?: string | null;
+    clickable?: boolean;
     x: number;
     y: number;
     width: number;
@@ -214,8 +221,19 @@ type MsdfRichTextMetricCache = WeakMap<MsdfRichTextStyle, MsdfRichTextMetricBuck
 type MsdfRichTextLineSegment = {
     text: string;
     style: MsdfRichTextStyle;
+    link?: string | null;
+    clickable?: boolean;
     width: number;
     height: number;
+};
+
+type MsdfRichTextClickArea = {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    text: string;
+    link: string | null;
 };
 
 type MsdfRichTextLayoutState = {
@@ -1069,6 +1087,14 @@ export class MsdfTextSprite extends Laya.Sprite {
     private _drawBatches: MsdfDrawBatch[] = [];
     private _plainTextLayoutDirty = true;
     private _plainTextBatchCache: MsdfPlainTextBatchCache = createEmptyPlainTextBatchCache();
+    private _richTextClickAreas: MsdfRichTextClickArea[] = [];
+    private _richTextClickListening = false;
+    private _richTextClickSavedHitArea: Laya.IHitArea | null = null;
+    private _richTextClickSavedMouseEnabled = false;
+    private _richTextClickSavedMouseThrough = true;
+    private readonly _richTextHitArea: Laya.IHitArea = {
+        contains: (x: number, y: number): boolean => this.hitRichTextClickArea(x, y) !== null
+    };
 
     constructor() {
         super();
@@ -1560,6 +1586,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         this._layout = layout;
         this._drawBatches = drawBatches;
         this.syncViewSize();
+        this.syncRichTextClickState();
         this.redraw();
     }
 
@@ -1575,7 +1602,95 @@ export class MsdfTextSprite extends Laya.Sprite {
         this._contentWidth = 0;
         this._contentHeight = 0;
         this._lines = [];
+        this.clearRichTextClickAreas();
         this.applyRenderState([]);
+    }
+
+    private clearRichTextClickAreas(): void {
+        this._richTextClickAreas.length = 0;
+    }
+
+    private syncRichTextClickState(): void {
+        const hasClickAreas = this._richTextClickAreas.length > 0;
+
+        if (hasClickAreas) {
+            if (!this._richTextClickListening) {
+                this._richTextClickSavedHitArea = this.hitArea;
+                this._richTextClickSavedMouseEnabled = this.mouseEnabled;
+                this._richTextClickSavedMouseThrough = this.mouseThrough;
+                this.mouseEnabled = true;
+            }
+
+            this.hitArea = this._richTextHitArea;
+            this.mouseThrough = false;
+
+            if (this._richTextClickListening) {
+                return;
+            }
+
+            this.on(Laya.Event.CLICK, this, this.handleRichTextClick);
+            this._richTextClickListening = true;
+            return;
+        }
+
+        if (!this._richTextClickListening) {
+            return;
+        }
+
+        this.off(Laya.Event.CLICK, this, this.handleRichTextClick);
+        this._richTextClickListening = false;
+        this.hitArea = this._richTextClickSavedHitArea;
+        this.mouseEnabled = this._richTextClickSavedMouseEnabled;
+        this.mouseThrough = this._richTextClickSavedMouseThrough;
+        this._richTextClickSavedHitArea = null;
+    }
+
+    private isPointInsideActiveClip(x: number, y: number): boolean {
+        if (this._overflow !== "hidden" && this._overflow !== "scroll") {
+            return true;
+        }
+
+        const clipWidth = this._viewFrame.clipRectWidth >= 0 ? this._viewFrame.clipRectWidth : this.width;
+        const clipHeight = this._viewFrame.clipRectHeight >= 0 ? this._viewFrame.clipRectHeight : this.height;
+        const clipX = this._viewFrame.clipRectX;
+        const clipY = this._viewFrame.clipRectY;
+
+        return clipWidth > 0
+            && clipHeight > 0
+            && x >= clipX
+            && y >= clipY
+            && x <= clipX + clipWidth
+            && y <= clipY + clipHeight;
+    }
+
+    private hitRichTextClickArea(x: number, y: number): MsdfRichTextClickArea | null {
+        if (this._richTextClickAreas.length === 0 || !this.isPointInsideActiveClip(x, y)) {
+            return null;
+        }
+
+        const localX = x - this._viewFrame.drawOffsetX;
+        const localY = y - this._viewFrame.drawOffsetY;
+
+        for (let i = this._richTextClickAreas.length - 1; i >= 0; i--) {
+            const area = this._richTextClickAreas[i];
+            if (localX >= area.x
+                && localY >= area.y
+                && localX <= area.x + area.width
+                && localY <= area.y + area.height) {
+                return area;
+            }
+        }
+
+        return null;
+    }
+
+    private handleRichTextClick(): void {
+        const area = this.hitRichTextClickArea(this.mouseX, this.mouseY);
+        if (!area) {
+            return;
+        }
+
+        this.bubbleEvent(Laya.Event.LINK, area.link ?? area.text);
     }
 
     private buildPlainTextLineMetrics(shrinkScale: number): MsdfTextLineMetric[] {
@@ -1653,6 +1768,7 @@ export class MsdfTextSprite extends Laya.Sprite {
     }
 
     private buildPlainTextRefreshResult(): MsdfTextRefreshResult {
+        this.clearRichTextClickAreas();
         this._layout = this.getPlainTextLayout();
         const shrinkScale = this.resolveShrinkScale(this._layout.width, this._layout.height);
 
@@ -1737,7 +1853,7 @@ export class MsdfTextSprite extends Laya.Sprite {
 
     private rebuildRichTextLine(
         line: MsdfRichTextLine,
-        segments: Array<{ text: string; style: MsdfRichTextStyle; }>,
+        segments: Array<{ text: string; style: MsdfRichTextStyle; link?: string | null; clickable?: boolean; }>,
         fallbackHeight: number,
         metricCache: MsdfRichTextMetricCache
     ): void {
@@ -1759,6 +1875,8 @@ export class MsdfTextSprite extends Laya.Sprite {
             const cmd: MsdfRichTextCommand = {
                 text: segment.text,
                 style: segment.style,
+                link: segment.link ?? null,
+                clickable: !!segment.clickable,
                 x: width,
                 y: 0,
                 width: metrics.width,
@@ -1784,7 +1902,9 @@ export class MsdfTextSprite extends Laya.Sprite {
         state: MsdfRichTextLayoutState,
         text: string,
         style: MsdfRichTextStyle,
-        metrics?: MsdfRichTextMetrics
+        metrics?: MsdfRichTextMetrics,
+        link?: string | null,
+        clickable?: boolean
     ): void {
         // cmd 是富文本排版阶段的中间结构，后续才会展开成真正提交给 GPU 的顶点数据。
         if (!text || !state.currentLine) {
@@ -1796,6 +1916,8 @@ export class MsdfTextSprite extends Laya.Sprite {
         const cmd: MsdfRichTextCommand = {
             text,
             style,
+            link: link ?? null,
+            clickable: !!clickable,
             x: state.lineX,
             y: 0,
             width: resolvedMetrics.width,
@@ -1856,6 +1978,8 @@ export class MsdfTextSprite extends Laya.Sprite {
         const nextCmd: MsdfRichTextCommand = {
             text: tail,
             style: cmd.style,
+            link: cmd.link ?? null,
+            clickable: !!cmd.clickable,
             x: 0,
             y: 0,
             width: this.getRichTextMetrics(tail, cmd.style, metricCache).width,
@@ -2075,7 +2199,9 @@ export class MsdfTextSprite extends Laya.Sprite {
         state: MsdfRichTextLayoutState,
         text: string,
         style: MsdfRichTextStyle,
-        noBreakWord: boolean
+        noBreakWord: boolean,
+        link?: string | null,
+        clickable?: boolean
     ): void {
         // 换行策略分两步：
         // 1. 先按字符试探这一段还能在本行放下多少；
@@ -2087,7 +2213,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         const italicExtra = styleSkewExtra(styleMetrics.height, style);
 
         if (totalMetrics.width <= remainWidth) {
-            this.appendRichTextCommand(state, text, style, totalMetrics);
+            this.appendRichTextCommand(state, text, style, totalMetrics, link, clickable);
             return;
         }
 
@@ -2134,7 +2260,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             }
 
             if (part.length > 0) {
-                this.appendRichTextCommand(state, part, style, { width: wordWidth, height: styleMetrics.height });
+                this.appendRichTextCommand(state, part, style, { width: wordWidth, height: styleMetrics.height }, link, clickable);
             }
 
             const advanced = this.advanceWrappedSegmentState(state, text, j, charInfo, charWidth, emoji, style, italicExtra, styleMetrics.extraWidth);
@@ -2144,7 +2270,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             wordWidth = advanced.wordWidth;
         }
 
-        this.appendRichTextCommand(state, text.substring(startIndex, len), style);
+        this.appendRichTextCommand(state, text.substring(startIndex, len), style, undefined, link, clickable);
     }
 
     private buildRichTextLineMetrics(lines: MsdfRichTextLine[], shrinkScale: number): MsdfTextLineMetric[] {
@@ -2350,7 +2476,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         rectHeight: number,
         lastHeight: number,
         getTextMetrics: (text: string, style: MsdfRichTextStyle) => MsdfRichTextMetrics,
-        rebuildLine: (line: MsdfRichTextLine, segments: Array<{ text: string; style: MsdfRichTextStyle; }>, fallbackHeight: number) => void,
+        rebuildLine: (line: MsdfRichTextLine, segments: Array<{ text: string; style: MsdfRichTextStyle; link?: string | null; clickable?: boolean; }>, fallbackHeight: number) => void,
         getFallbackStyle: () => MsdfRichTextStyle | null
     ): void {
         if (this._overflow !== "ellipsis" || lines.length === 0) {
@@ -2383,6 +2509,8 @@ export class MsdfTextSprite extends Laya.Sprite {
             segments.push({
                 text: cmd.text,
                 style: cmd.style,
+                link: cmd.link ?? null,
+                clickable: !!cmd.clickable,
                 width: metrics.width,
                 height: metrics.height
             });
@@ -2433,6 +2561,8 @@ export class MsdfTextSprite extends Laya.Sprite {
             segments.push({
                 text: ELLIPSIS_TEXT,
                 style: ellipsisStyle,
+                link: null,
+                clickable: false,
                 width: ellipsisMetrics.width,
                 height: ellipsisMetrics.height
             });
@@ -2440,7 +2570,12 @@ export class MsdfTextSprite extends Laya.Sprite {
 
         rebuildLine(
             lastLine,
-            segments.map(segment => ({ text: segment.text, style: segment.style })),
+            segments.map(segment => ({
+                text: segment.text,
+                style: segment.style,
+                link: segment.link ?? null,
+                clickable: !!segment.clickable
+            })),
             this.font.getLineHeight(fallbackStyle.fontSize) || lastHeight
         );
     }
@@ -2553,15 +2688,22 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
     }
 
-    private appendRichTextLineText(state: MsdfRichTextLayoutState, text: string, style: MsdfRichTextStyle, wordWrap: boolean): void {
+    private appendRichTextLineText(
+        state: MsdfRichTextLayoutState,
+        text: string,
+        style: MsdfRichTextStyle,
+        wordWrap: boolean,
+        link?: string | null,
+        clickable?: boolean
+    ): void {
         if (!text) {
             return;
         }
 
         if (wordWrap) {
-            this.wrapRichTextSegment(state, text, style, true);
+            this.wrapRichTextSegment(state, text, style, true, link, clickable);
         } else {
-            this.appendRichTextCommand(state, text, style);
+            this.appendRichTextCommand(state, text, style, undefined, link, clickable);
         }
     }
 
@@ -2572,9 +2714,10 @@ export class MsdfTextSprite extends Laya.Sprite {
 
         state.lastHeight = this.getRichTextRenderMetrics(run.style, state.metricCache).height;
         const splitLines = run.text.split("\n");
+        const metadata = run as MsdfRichTextRun & MsdfRichTextRunMetadata;
 
         for (let i = 0, n = splitLines.length; i < n; i++) {
-            this.appendRichTextLineText(state, splitLines[i], run.style, wordWrap);
+            this.appendRichTextLineText(state, splitLines[i], run.style, wordWrap, metadata.link ?? null, !!metadata.clickable);
 
             if (i !== n - 1) {
                 this.advanceRichTextLine(state);
@@ -2649,6 +2792,25 @@ export class MsdfTextSprite extends Laya.Sprite {
         return createBatchGroup(batch);
     }
 
+    private isRichTextCommandClickable(cmd: MsdfRichTextCommand): boolean {
+        return cmd.link != null || !!cmd.clickable;
+    }
+
+    private recordRichTextClickArea(cmd: MsdfRichTextCommand, x: number, y: number, width: number, height: number): void {
+        if (!this.isRichTextCommandClickable(cmd) || width <= 0 || height <= 0) {
+            return;
+        }
+
+        this._richTextClickAreas.push({
+            x,
+            y,
+            width,
+            height,
+            text: cmd.text,
+            link: cmd.link ?? null
+        });
+    }
+
     private appendRichTextLineBatches(
         drawBatches: MsdfDrawBatch[],
         pendingGroup: MsdfDrawBatchGroup | null,
@@ -2663,14 +2825,17 @@ export class MsdfTextSprite extends Laya.Sprite {
         let cmd = line.cmd;
 
         while (cmd) {
+            const x = lineOffsetX + cmd.x * shrinkScale - scrollOffsetX;
+            const y = (line.y + cmd.y) * shrinkScale - scrollOffsetY;
             const batch = this.buildRunBatch(
                 cmd,
-                lineOffsetX + cmd.x * shrinkScale - scrollOffsetX,
-                (line.y + cmd.y) * shrinkScale - scrollOffsetY,
+                x,
+                y,
                 layoutCache,
                 shrinkScale
             );
             if (batch) {
+                this.recordRichTextClickArea(cmd, x, y, cmd.width * shrinkScale, cmd.height * shrinkScale);
                 pendingGroup = this.appendMergedBatch(drawBatches, pendingGroup, batch);
             }
             cmd = cmd.next;
@@ -2682,6 +2847,7 @@ export class MsdfTextSprite extends Laya.Sprite {
     private buildRichTextDrawBatches(lines: MsdfRichTextLine[], shrinkScale: number): MsdfDrawBatch[] {
         const contentBoxWidth = this._layoutWidth >= 0 ? this._layoutWidth : this._contentWidth;
         const drawBatches: MsdfDrawBatch[] = [];
+        this.clearRichTextClickAreas();
         // 富文本里同样的“文本片段 + 样式”组合可能重复出现。
         // 先缓存每个 run 的布局，再把可合并的 run 拼成更大的 GPU batch。
         const layoutCache: MsdfRichTextLayoutCache = new WeakMap();

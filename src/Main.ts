@@ -8,6 +8,7 @@ const MSDF_JSON_URL = "res://bb450ed1-6826-4998-b470-d77a2462095a";
 const NATIVE_FONT_URL = "resources/source-han-sans-cn-medium.ttf";
 const CARD_WIDTH = 492;
 const CARD_HEIGHT = 340;
+const RICH_TEXT_CARD_HEIGHT = 420;
 const CARD_GAP = 24;
 const PANEL_X = 24;
 const PANEL_Y = 24;
@@ -28,6 +29,7 @@ type MainCompareCase = {
     note: string;
     buildMsdf: () => MsdfLabel;
     buildNative: () => Laya.Label;
+    cardHeight?: number;
 };
 
 type MainCompareGroup = {
@@ -409,12 +411,13 @@ export class Main extends Laya.Script {
             {
                 id: "D",
                 title: "语法混排",
-                note: "补充 UBB 和 HTML 的富文本场景，重点看嵌套样式、段落、列表和换行解析。",
+                note: "补充 UBB 和 HTML 的富文本场景，重点看嵌套样式、段落、列表、换行和下划线点击事件。",
                 cases: [
                     {
                         id: "D1",
                         title: "ubb rich styles",
-                        note: "验证 UBB 的 color、size、b、i、u 嵌套，以及多行内容的排版。",
+                        note: "验证 UBB 的 color、size、b、i、u、url 嵌套，以及下划线点击事件。",
+                        cardHeight: RICH_TEXT_CARD_HEIGHT,
                         buildMsdf: () => {
                             const label = this.createMsdfLabel(this.createUbbSampleText());
                             label.font = "demo-msdf";
@@ -431,6 +434,7 @@ export class Main extends Laya.Script {
                             label.shadowColor = "#020b14cc";
                             label.shadowOffsetX = 2;
                             label.shadowOffsetY = 2;
+                            label.on(Laya.Event.LINK, this, this.handleMsdfRichTextLink);
                             return label;
                         },
                         buildNative: () => {
@@ -452,7 +456,8 @@ export class Main extends Laya.Script {
                     {
                         id: "D2",
                         title: "html rich layout",
-                        note: "验证 HTML 的 b、i、u、div、p、span、li、br 和空格实体解析。",
+                        note: "验证 HTML 的 b、i、u、a、div、p、li、br 和下划线点击事件。",
+                        cardHeight: RICH_TEXT_CARD_HEIGHT,
                         buildMsdf: () => {
                             const label = this.createMsdfLabel(this.createHtmlSampleText());
                             label.font = "demo-msdf";
@@ -469,6 +474,7 @@ export class Main extends Laya.Script {
                             label.shadowColor = "#04111acc";
                             label.shadowOffsetX = 2;
                             label.shadowOffsetY = 2;
+                            label.on(Laya.Event.LINK, this, this.handleMsdfRichTextLink);
                             return label;
                         },
                         buildNative: () => {
@@ -513,20 +519,23 @@ export class Main extends Laya.Script {
         section.addChild(groupHeader);
 
         const cardsTop = groupHeader.height + GROUP_CONTENT_GAP;
+        const rowHeights: number[] = [];
         group.cases.forEach((item, index) => {
             const card = this.createComparisonCard(item);
-            card.pos((index % 2) * (CARD_WIDTH + CARD_GAP), cardsTop + Math.floor(index / 2) * (CARD_HEIGHT + CARD_GAP));
+            const rowIndex = Math.floor(index / 2);
+            const y = rowHeights.slice(0, rowIndex).reduce((sum, height) => sum + height + CARD_GAP, cardsTop);
+            rowHeights[rowIndex] = Math.max(rowHeights[rowIndex] ?? 0, card.height);
+            card.pos((index % 2) * (CARD_WIDTH + CARD_GAP), y);
             section.addChild(card);
         });
 
-        const rowCount = Math.ceil(group.cases.length / 2);
-        const gridHeight = rowCount > 0 ? rowCount * CARD_HEIGHT + (rowCount - 1) * CARD_GAP : 0;
+        const gridHeight = rowHeights.reduce((sum, height, index) => sum + height + (index > 0 ? CARD_GAP : 0), 0);
         section.size(CARD_WIDTH * 2 + CARD_GAP, cardsTop + gridHeight);
         return section;
     }
 
     private createComparisonCard(item: MainCompareCase): Laya.Sprite {
-        const card = this.createCaseCard(item.id, item.title, item.note);
+        const card = this.createCaseCard(item.id, item.title, item.note, item.cardHeight ?? CARD_HEIGHT);
 
         const nativeTag = this.createTag("Laya", "#3a2317", "#ffbe78");
         nativeTag.pos(18, COMPARE_TOP);
@@ -624,10 +633,10 @@ export class Main extends Laya.Script {
         return box;
     }
 
-    private createCaseCard(id: string, title: string, note: string): Laya.Sprite {
+    private createCaseCard(id: string, title: string, note: string, height: number): Laya.Sprite {
         const card = new Laya.Sprite();
-        card.size(CARD_WIDTH, CARD_HEIGHT);
-        card.graphics.drawRect(0, 0, CARD_WIDTH, CARD_HEIGHT, "#111c2b", "#2a425f", 2);
+        card.size(CARD_WIDTH, height);
+        card.graphics.drawRect(0, 0, CARD_WIDTH, height, "#111c2b", "#2a425f", 2);
         card.graphics.drawLine(18, COMPARE_TOP + SECTION_HEIGHT + 4, CARD_WIDTH - 18, COMPARE_TOP + SECTION_HEIGHT + 4, "#22364d", 1);
 
         const titleLabel = new Laya.Label();
@@ -675,15 +684,19 @@ export class Main extends Laya.Script {
     private createUbbSampleText(): string {
         return "[size=30][color=#71d7ff][b]首领警报[/b][/color][/size]\n"
             + "[i][color=#ff9c73]第二形态已激活[/color][/i]\n"
-            + "[u][size=24][color=#ffe082]护盾剩余 37%[/color][/size][/u]\n"
+            + "[url=msdf://shield-file][u][size=24][color=#ffe082]护盾文件[/color][/size][/u][/url] [u][color=#bde7ff]备用文件[/color][/u]\n"
             + "[color=#9fe29f][b]建议：[/b][/color][size=22]集火核心并保持走位[/size]";
     }
 
     private createHtmlSampleText(): string {
         return "<div><b>任务简报</b></div>"
-            + "<p><i>第一阶段：</i><u>封锁入口</u><br />第二阶段：保持阵型</p>"
+            + "<p><i>第一阶段：</i><a href='msdf://mission-file'><u>封锁入口文件</u></a> <u>备用文件</u><br />第二阶段：保持阵型</p>"
             + "<p><li>前排吸收伤害</li><li>后排集中输出</li></p>"
             + "<span>剩余时间&nbsp;00:18</span>";
+    }
+
+    private handleMsdfRichTextLink(value: string): void {
+        console.log("[MSDF RichText LINK]", value);
     }
 
     private createMsdfLabel(text: string): MsdfLabel {
@@ -709,7 +722,7 @@ export class Main extends Laya.Script {
             Math.min(PANEL_HEIGHT, Math.max(Laya.stage.height - PANEL_Y * 2, 320))
         );
         panel.graphics.drawRect(0, 0, panel.width, panel.height, "#0f1a2a", "#324a67", 2);
-        panel.scrollType = (Laya as any).ScrollType?.Vertical ?? 2;
+        panel.scrollType = Laya.ScrollType.Vertical;
         panel.vScrollBarSkin = "";
         panel.elasticEnabled = true;
         return panel;

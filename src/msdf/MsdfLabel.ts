@@ -23,6 +23,10 @@ type MsdfLabelParsedText = {
     text: string;
     useHtml: boolean;
 };
+type MsdfLabelRichTextRunMetadata = {
+    link?: string | null;
+    clickable?: boolean;
+};
 type MsdfLabelTextSpriteLayout = {
     layoutWidth: number;
     layoutHeight: number;
@@ -1062,18 +1066,22 @@ export class MsdfLabel extends Laya.UIComponent {
         };
     }
 
-    private appendRichTextRun(runs: MsdfRichTextRun[], text: string, style: MsdfRichTextStyle): void {
+    private appendRichTextRun(runs: MsdfRichTextRun[], text: string, style: MsdfRichTextStyle, link: string | null = null, clickable: boolean = false): void {
         if (!text) {
             return;
         }
 
-        const previous = runs[runs.length - 1];
-        if (previous && sameRichStyle(previous.style, style)) {
+        const previous = runs[runs.length - 1] as (MsdfRichTextRun & MsdfLabelRichTextRunMetadata) | undefined;
+        if (previous
+            && sameRichStyle(previous.style, style)
+            && (previous.link ?? null) === link
+            && !!previous.clickable === clickable) {
             previous.text += text;
             return;
         }
 
-        runs.push({ text, style });
+        const run: MsdfRichTextRun & MsdfLabelRichTextRunMetadata = { text, style, link, clickable };
+        runs.push(run);
     }
 
     private normalizeSourceText(): string {
@@ -1113,13 +1121,25 @@ export class MsdfLabel extends Laya.UIComponent {
 
         const elements: Laya.HtmlElement[] = [];
         htmlParser.parse(text, baseStyle, elements, this._htmlParseOptions);
+        let currentLink: string | null = null;
 
         for (const element of elements) {
+            if (element.type === htmlElementType.Link) {
+                currentLink = element.getAttrString("href", "");
+                continue;
+            }
+
+            if (element.type === htmlElementType.LinkEnd) {
+                currentLink = null;
+                continue;
+            }
+
             if (element.type !== htmlElementType.Text || !element.text) {
                 continue;
             }
 
-            this.appendRichTextRun(runs, element.text, this.toRichTextStyle(element.style));
+            const richStyle = this.toRichTextStyle(element.style);
+            this.appendRichTextRun(runs, element.text, richStyle, currentLink, currentLink !== null || !!richStyle.underline);
         }
 
         if (htmlElement?.returnToPool) {
