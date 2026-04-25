@@ -34,6 +34,37 @@
       "color": "#FFFFFF",
       "valign": "top",
       "padding": "0,0,0,0"
+    },
+    {
+      "_$id": "3rj91j2y",
+      "_$type": "83017376-45c6-4c18-8102-ffc59219b008",
+      "name": "MsdfLabel",
+      "scriptPath": "../src/msdf/MsdfLabel.ts",
+      "x": 526,
+      "y": 211,
+      "width": 430,
+      "height": 148,
+      "text": "我们不一样我们不一样我们不一样",
+      "font": "resources/msdf/source-han-sans-cn-medium.json",
+      "fontSize": 50,
+      "color": "rgba(220, 220, 220, 1)",
+      "templateVars": true,
+      "valign": "top",
+      "bgColor": "",
+      "borderColor": "",
+      "overflow": "shrink",
+      "wordWrap": true,
+      "leading": 21,
+      "padding": "0,0,0,0",
+      "underlineColor": "rgba(103, 82, 82, 1)",
+      "stroke": 3.2,
+      "strokeColor": "rgba(43, 42, 11, 1)",
+      "glow": 0,
+      "glowColor": "rgba(66, 175, 42, 1)",
+      "shadowBlur": 0,
+      "shadowOffsetX": 0,
+      "shadowOffsetY": 0,
+      "shadowColor": "#000000"
     }
   ]
 }

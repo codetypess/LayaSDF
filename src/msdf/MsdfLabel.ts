@@ -39,6 +39,10 @@ type MsdfLabelTextSpriteLayout = {
     layoutHeight: number;
     wrapWidth: number;
 };
+type MsdfFontJsonAsset = {
+    pages?: unknown;
+    data?: unknown;
+};
 type MsdfLabelViewportFrame = {
     width: number;
     height: number;
@@ -52,6 +56,10 @@ type MsdfLabelViewportFrame = {
 const NORMALIZE_CR = /\r\n?/g;
 const ESCAPE_CHARS_PATTERN = /\\(\w)/g;
 const ESCAPE_SEQUENCE: Record<string, string> = { "\\n": "\n", "\\t": "\t" };
+const JSON_ASSET_PATTERN = /\.json(?:$|[?#])/i;
+const URL_SCHEME_PATTERN = /^(?:[a-z]+:)?\/\//i;
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-zA-Z]:[\\/]/;
+const DEFAULT_MSDF_SHADER_URL = "shaders/MsdfText.shader";
 
 const { regClass } = Laya;
 
@@ -74,16 +82,78 @@ function parsePadding(value: string): Padding {
 }
 
 function colorToVector4(value: string): Laya.Vector4 {
-    const num = Laya.Utils.fromStringColor(value || "#ffffff");
-    const r = ((num >> 16) & 0xff) / 255;
-    const g = ((num >> 8) & 0xff) / 255;
-    const b = (num & 0xff) / 255;
-    const a = num > 0xffffff ? ((num >> 24) & 0xff) / 255 : 1;
+    const rgba = Laya.ColorUtils.create(value || "#ffffff").arrColor;
+    const r = rgba?.[0] ?? 1;
+    const g = rgba?.[1] ?? 1;
+    const b = rgba?.[2] ?? 1;
+    const a = rgba?.[3] ?? 1;
     return new Laya.Vector4(r, g, b, a);
 }
 
 function normalizeColor(value: string | null | undefined, fallback: string): string {
     return value || fallback;
+}
+
+function normalizeFontJsonAssetData(raw: unknown): MsdfFontJsonAsset | null {
+    let data = raw;
+
+    if (data && typeof data === "object" && "data" in data) {
+        data = (data as { data: unknown }).data;
+    }
+
+    if (typeof data === "string") {
+        try {
+            data = JSON.parse(data);
+        } catch {
+            return null;
+        }
+    }
+
+    return data && typeof data === "object" ? (data as MsdfFontJsonAsset) : null;
+}
+
+function normalizeAssetUrl(value: string): string {
+    return value.replace(/\\/g, "/");
+}
+
+function isAbsoluteAssetUrl(value: string): boolean {
+    return (
+        value.startsWith("res://") ||
+        value.startsWith("/") ||
+        WINDOWS_ABSOLUTE_PATH_PATTERN.test(value) ||
+        URL_SCHEME_PATTERN.test(value)
+    );
+}
+
+function resolveAssetUrl(baseUrl: string, relativeUrl: string): string {
+    const normalizedRelativeUrl = normalizeAssetUrl(relativeUrl.trim());
+    if (!normalizedRelativeUrl) {
+        return "";
+    }
+
+    if (isAbsoluteAssetUrl(normalizedRelativeUrl)) {
+        return normalizedRelativeUrl;
+    }
+
+    const baseSegments = normalizeAssetUrl(baseUrl).split("/");
+    baseSegments.pop();
+
+    for (const segment of normalizedRelativeUrl.split("/")) {
+        if (!segment || segment === ".") {
+            continue;
+        }
+
+        if (segment === "..") {
+            if (baseSegments.length > 0) {
+                baseSegments.pop();
+            }
+            continue;
+        }
+
+        baseSegments.push(segment);
+    }
+
+    return baseSegments.join("/");
 }
 
 function sameRichStyle(left: MsdfRichTextStyle, right: MsdfRichTextStyle): boolean {
@@ -103,8 +173,11 @@ function sameRichStyle(left: MsdfRichTextStyle, right: MsdfRichTextStyle): boole
     );
 }
 
-@regClass()
-export class MsdfLabel extends Laya.UIComponent {
+@Laya.regClass()
+@Laya.classInfo({
+    menu: "自定义",
+})
+export class MsdfLabel extends Laya.Label {
     private static readonly fontCache = new Map<string, Promise<MsdfBitmapFont>>();
     private static readonly registeredFonts = new Map<string, MsdfFontResourceConfig>();
 
@@ -146,8 +219,8 @@ export class MsdfLabel extends Laya.UIComponent {
     private _fontName = "";
     private _maxWidth = 0;
     private _overflow: MsdfOverflow = "visible";
-    private _fitContent: MsdfLabelFitContent = "no";
-    private _fitFlag = false;
+    protected override _fitContent: MsdfLabelFitContent = "no";
+    private _msdfFitFlag = false;
     private _ignoreLang = false;
     private _templateVars: MsdfTemplateVars | null = null;
     private _htmlParseOptions: Laya.HtmlParseOptions | null = null;
@@ -158,23 +231,60 @@ export class MsdfLabel extends Laya.UIComponent {
     private _fontShaderUrl = "";
     private _paddingValues: Padding = [0, 0, 0, 0];
     private _maxOutlineWidth = 0;
+    private _fontResolveToken = 0;
 
     constructor(text?: string) {
-        super(false);
-        this._text = text ?? "";
-        this.createChildren();
-        this.initialize();
+        super();
+
+        if (text !== undefined) {
+            this.text = text;
+        }
     }
 
     protected override createChildren(): void {
-        super.createChildren();
-
         if (!this._textSprite) {
             this._textSprite = new MsdfTextSprite();
-            this._textSprite.mouseThrough = true;
-            this._textSprite.visible = false;
+            this.configureInternalTextSprite(this._textSprite);
             this.addChild(this._textSprite);
         }
+    }
+
+    override onAfterDeserialize(): void {
+        super.onAfterDeserialize();
+
+        this.configureInternalTextSprite(this._textSprite);
+        this.pruneLegacySerializedChildren();
+    }
+
+    private configureInternalTextSprite(textSprite: MsdfTextSprite): void {
+        textSprite.mouseThrough = true;
+        textSprite.visible = false;
+        textSprite.hideFlags = Laya.HideFlags.HideAndDontSave;
+        this._tf = textSprite as unknown as Laya.Text;
+        this._tf.hideFlags = Laya.HideFlags.HideAndDontSave;
+    }
+
+    private pruneLegacySerializedChildren(): void {
+        for (let index = this.numChildren - 1; index >= 0; index -= 1) {
+            const child = this.getChildAt(index);
+            if (!this.isLegacySerializedChild(child)) {
+                continue;
+            }
+
+            this.removeChildAt(index);
+            child.destroy();
+        }
+    }
+
+    private isLegacySerializedChild(child: Laya.Node): child is Laya.Sprite {
+        return (
+            child !== this._textSprite &&
+            child instanceof Laya.Sprite &&
+            child.hideFlags === 0 &&
+            child.mouseThrough === true &&
+            child.numChildren === 0 &&
+            !child.name
+        );
     }
 
     static preload(
@@ -233,12 +343,17 @@ export class MsdfLabel extends Laya.UIComponent {
         this.callLater(kind === "text" ? this.changeText : this.updateLayoutFrame);
     }
 
-    get text(): string {
+    override get text(): string {
         return this._text;
     }
 
-    set text(value: string) {
-        let nextValue = value == null ? "" : typeof value === "string" ? value : `${value}`;
+    override set text(value: string) {
+        let nextValue =
+            value === null || value === undefined
+                ? ""
+                : typeof value === "string"
+                  ? value
+                  : `${value}`;
         const langPacks = (Laya.Text as typeof Laya.Text & { langPacks?: Record<string, string> })
             ?.langPacks;
         if (!this._ignoreLang && langPacks) {
@@ -253,11 +368,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.event(Laya.Event.CHANGE);
     }
 
-    get fontSize(): number {
+    override get fontSize(): number {
         return this._fontSize;
     }
 
-    set fontSize(value: number) {
+    override set fontSize(value: number) {
         if (this._fontSize === value) {
             return;
         }
@@ -291,11 +406,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get color(): string {
+    override get color(): string {
         return this._color;
     }
 
-    set color(value: string) {
+    override set color(value: string) {
         if (this._color === value) {
             return;
         }
@@ -303,11 +418,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get align(): string {
+    override get align(): string {
         return this._align;
     }
 
-    set align(value: string) {
+    override set align(value: string) {
         if (this._align === value) {
             return;
         }
@@ -315,11 +430,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get valign(): string {
+    override get valign(): string {
         return this._valign;
     }
 
-    set valign(value: string) {
+    override set valign(value: string) {
         if (this._valign === value) {
             return;
         }
@@ -327,11 +442,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh("layout");
     }
 
-    get alignItems(): string {
+    override get alignItems(): string {
         return this._alignItems;
     }
 
-    set alignItems(value: string) {
+    override set alignItems(value: string) {
         const next = value || "middle";
         if (this._alignItems === next) {
             return;
@@ -340,11 +455,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get leading(): number {
+    override get leading(): number {
         return this._leading;
     }
 
-    set leading(value: number) {
+    override set leading(value: number) {
         if (this._leading === value) {
             return;
         }
@@ -352,11 +467,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get padding(): string {
+    override get padding(): string {
         return this._padding;
     }
 
-    set padding(value: string) {
+    override set padding(value: string) {
         if (this._padding === value) {
             return;
         }
@@ -365,11 +480,17 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get stroke(): number {
+    @Laya.property({
+        type: Number,
+        step: 0.1,
+        min: 0,
+        fractionDigits: 1,
+    })
+    override get stroke(): number {
         return this._stroke;
     }
 
-    set stroke(value: number) {
+    override set stroke(value: number) {
         if (this._stroke === value) {
             return;
         }
@@ -377,11 +498,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get strokeColor(): string {
+    override get strokeColor(): string {
         return this._strokeColor;
     }
 
-    set strokeColor(value: string) {
+    override set strokeColor(value: string) {
         if (this._strokeColor === value) {
             return;
         }
@@ -389,6 +510,12 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
+    @Laya.property({
+        type: Number,
+        step: 0.1,
+        min: 0,
+        fractionDigits: 1,
+    })
     get glow(): number {
         return this._glow;
     }
@@ -402,6 +529,10 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
+    @Laya.property({
+        type: String,
+        inspector: "color",
+    })
     get glowColor(): string {
         return this._glowColor;
     }
@@ -414,18 +545,12 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get shadowColor(): string {
-        return this._shadowColor;
-    }
-
-    set shadowColor(value: string) {
-        if (this._shadowColor === value) {
-            return;
-        }
-        this._shadowColor = value || "#000000";
-        this.scheduleRefresh();
-    }
-
+    @Laya.property({
+        type: Number,
+        step: 0.1,
+        min: 0,
+        fractionDigits: 1,
+    })
     get shadowBlur(): number {
         return this._shadowBlur;
     }
@@ -439,6 +564,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
+    @Laya.property({
+        type: Number,
+        step: 0.1,
+        fractionDigits: 1,
+    })
     get shadowOffsetX(): number {
         return this._shadowOffsetX;
     }
@@ -451,6 +581,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
+    @Laya.property({
+        type: Number,
+        step: 0.1,
+        fractionDigits: 1,
+    })
     get shadowOffsetY(): number {
         return this._shadowOffsetY;
     }
@@ -463,11 +598,27 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get bgColor(): string {
+    @Laya.property({
+        type: String,
+        inspector: "color",
+    })
+    get shadowColor(): string {
+        return this._shadowColor;
+    }
+
+    set shadowColor(value: string) {
+        if (this._shadowColor === value) {
+            return;
+        }
+        this._shadowColor = value || "#000000";
+        this.scheduleRefresh();
+    }
+
+    override get bgColor(): string {
         return this._bgColor;
     }
 
-    set bgColor(value: string) {
+    override set bgColor(value: string) {
         if (this._bgColor === value) {
             return;
         }
@@ -475,11 +626,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh("layout");
     }
 
-    get borderColor(): string {
+    override get borderColor(): string {
         return this._borderColor;
     }
 
-    set borderColor(value: string) {
+    override set borderColor(value: string) {
         if (this._borderColor === value) {
             return;
         }
@@ -487,11 +638,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh("layout");
     }
 
-    get wordWrap(): boolean {
+    override get wordWrap(): boolean {
         return this._wordWrap;
     }
 
-    set wordWrap(value: boolean) {
+    override set wordWrap(value: boolean) {
         if (this._wordWrap === value) {
             return;
         }
@@ -499,11 +650,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get bold(): boolean {
+    override get bold(): boolean {
         return this._bold;
     }
 
-    set bold(value: boolean) {
+    override set bold(value: boolean) {
         const next = !!value;
         if (this._bold === next) {
             return;
@@ -512,11 +663,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get italic(): boolean {
+    override get italic(): boolean {
         return this._italic;
     }
 
-    set italic(value: boolean) {
+    override set italic(value: boolean) {
         const next = !!value;
         if (this._italic === next) {
             return;
@@ -525,11 +676,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get underline(): boolean {
+    override get underline(): boolean {
         return this._underline;
     }
 
-    set underline(value: boolean) {
+    override set underline(value: boolean) {
         const next = !!value;
         if (this._underline === next) {
             return;
@@ -538,11 +689,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get underlineColor(): string {
+    override get underlineColor(): string {
         return this._underlineColor;
     }
 
-    set underlineColor(value: string) {
+    override set underlineColor(value: string) {
         if (this._underlineColor === value) {
             return;
         }
@@ -550,11 +701,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get strikethrough(): boolean {
+    override get strikethrough(): boolean {
         return this._strikethrough;
     }
 
-    set strikethrough(value: boolean) {
+    override set strikethrough(value: boolean) {
         const next = !!value;
         if (this._strikethrough === next) {
             return;
@@ -563,11 +714,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get strikethroughColor(): string {
+    override get strikethroughColor(): string {
         return this._strikethroughColor;
     }
 
-    set strikethroughColor(value: string) {
+    override set strikethroughColor(value: string) {
         if (this._strikethroughColor === value) {
             return;
         }
@@ -575,11 +726,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get html(): boolean {
+    override get html(): boolean {
         return this._html;
     }
 
-    set html(value: boolean) {
+    override set html(value: boolean) {
         const next = !!value;
         if (this._html === next) {
             return;
@@ -588,11 +739,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get ubb(): boolean {
+    override get ubb(): boolean {
         return this._ubb;
     }
 
-    set ubb(value: boolean) {
+    override set ubb(value: boolean) {
         const next = !!value;
         if (this._ubb === next) {
             return;
@@ -601,11 +752,23 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get font(): string {
+    @Laya.property({
+        name: "font",
+        type: "string",
+        caption: "Font",
+        inspector: "asset",
+        isAsset: true,
+        assetTypeFilter: "Json",
+        useAssetPath: true,
+        tips: "选择 MSDF 字体 json。脚本里仍然支持注册名和 texture|json|shader。",
+    })
+    override get font(): string {
         return this._fontName;
     }
 
-    set font(value: string) {
+    override set font(value: string) {
+        this.cancelPendingFontResolution();
+
         if (this._fontName === value) {
             return;
         }
@@ -618,8 +781,13 @@ export class MsdfLabel extends Laya.UIComponent {
 
         const resources = this.resolveFontResources(this._fontName);
         if (!resources) {
+            if (this.isFontJsonReference(this._fontName)) {
+                this.resolveFontJsonReference(this._fontName, this._fontResolveToken);
+                return;
+            }
+
             console.warn(
-                `[MsdfLabel] unresolved font "${this._fontName}". Use MsdfLabel.registerFont(name, textureUrl, jsonUrl, shaderUrl) or pass "texture|json|shader".`
+                `[MsdfLabel] unresolved font "${this._fontName}". Use MsdfLabel.registerFont(name, textureUrl, jsonUrl, shaderUrl), pass "texture|json|shader", or assign an MSDF json path.`
             );
             return;
         }
@@ -627,11 +795,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.applyFontResources(resources);
     }
 
-    get maxWidth(): number {
+    override get maxWidth(): number {
         return this._maxWidth;
     }
 
-    set maxWidth(value: number) {
+    override set maxWidth(value: number) {
         const next = Math.max(0, value || 0);
         if (this._maxWidth === next) {
             return;
@@ -641,11 +809,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get overflow(): MsdfOverflow {
+    override get overflow(): MsdfOverflow {
         return this._overflow;
     }
 
-    set overflow(value: MsdfOverflow) {
+    override set overflow(value: MsdfOverflow) {
         const next = value || "visible";
         if (this._overflow === next) {
             return;
@@ -655,11 +823,11 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get fitContent(): MsdfLabelFitContent {
+    override get fitContent(): MsdfLabelFitContent {
         return this._fitContent;
     }
 
-    set fitContent(value: MsdfLabelFitContent | boolean) {
+    override set fitContent(value: MsdfLabelFitContent | boolean) {
         const next = typeof value === "boolean" ? (value ? "yes" : "no") : value || "no";
         if (this._fitContent === next) {
             return;
@@ -669,15 +837,19 @@ export class MsdfLabel extends Laya.UIComponent {
         this.scheduleRefresh();
     }
 
-    get textField(): MsdfTextSprite {
+    override get textField(): Laya.Text {
+        return this._tf;
+    }
+
+    get msdfTextField(): MsdfTextSprite {
         return this._textSprite;
     }
 
-    get ignoreLang(): boolean {
+    override get ignoreLang(): boolean {
         return this._ignoreLang;
     }
 
-    set ignoreLang(value: boolean) {
+    override set ignoreLang(value: boolean) {
         const next = !!value;
         if (this._ignoreLang === next) {
             return;
@@ -687,21 +859,23 @@ export class MsdfLabel extends Laya.UIComponent {
         this.text = this._text;
     }
 
-    get templateVars(): MsdfTemplateVars | null {
-        return this._templateVars;
+    override get templateVars(): MsdfTemplateVars {
+        return this._templateVars ?? {};
     }
 
-    set templateVars(value: MsdfTemplateVars | boolean | null) {
-        if (!this._templateVars && !value) {
+    override set templateVars(value: MsdfTemplateVars | boolean) {
+        const nextValue = value as MsdfTemplateVars | boolean | null | undefined;
+
+        if (!this._templateVars && !nextValue) {
             return;
         }
 
-        if (value === true) {
+        if (nextValue === true) {
             this._templateVars = {};
-        } else if (value === false || value == null) {
+        } else if (nextValue === false || nextValue === null || nextValue === undefined) {
             this._templateVars = null;
         } else {
-            this._templateVars = value;
+            this._templateVars = nextValue;
         }
 
         this.scheduleRefresh();
@@ -758,6 +932,7 @@ export class MsdfLabel extends Laya.UIComponent {
     }
 
     set fontTextureUrl(value: string) {
+        this.cancelPendingFontResolution();
         this.setFontResourceUrls(value || "", this._fontJsonUrl, this._fontShaderUrl);
     }
 
@@ -766,7 +941,24 @@ export class MsdfLabel extends Laya.UIComponent {
     }
 
     set fontJsonUrl(value: string) {
-        this.setFontResourceUrls(this._fontTextureUrl, value || "", this._fontShaderUrl);
+        const nextValue = value || "";
+
+        this.cancelPendingFontResolution();
+        if (!nextValue) {
+            this.setFontResourceUrls(this._fontTextureUrl, "", this._fontShaderUrl);
+            return;
+        }
+
+        if (this._fontTextureUrl) {
+            this.setFontResourceUrls(
+                this._fontTextureUrl,
+                nextValue,
+                this.resolveMsdfShaderUrl(this._fontShaderUrl)
+            );
+            return;
+        }
+
+        this.resolveFontJsonReference(nextValue, this._fontResolveToken, false);
     }
 
     get fontShaderUrl(): string {
@@ -774,6 +966,7 @@ export class MsdfLabel extends Laya.UIComponent {
     }
 
     set fontShaderUrl(value: string) {
+        this.cancelPendingFontResolution();
         this.setFontResourceUrls(this._fontTextureUrl, this._fontJsonUrl, value || "");
     }
 
@@ -826,7 +1019,7 @@ export class MsdfLabel extends Laya.UIComponent {
     }
 
     override set_width(value: number): void {
-        if (this._fitContent === "yes" && !this._fitFlag) {
+        if (this._fitContent === "yes" && !this._msdfFitFlag) {
             return;
         }
 
@@ -835,7 +1028,7 @@ export class MsdfLabel extends Laya.UIComponent {
     }
 
     override set_height(value: number): void {
-        if ((this._fitContent === "yes" || this._fitContent === "height") && !this._fitFlag) {
+        if ((this._fitContent === "yes" || this._fitContent === "height") && !this._msdfFitFlag) {
             return;
         }
 
@@ -878,7 +1071,82 @@ export class MsdfLabel extends Laya.UIComponent {
         return null;
     }
 
-    setVar(name: string, value: unknown): MsdfLabel {
+    private isFontJsonReference(value: string): boolean {
+        return JSON_ASSET_PATTERN.test(value);
+    }
+
+    private cancelPendingFontResolution(): void {
+        this._fontResolveToken += 1;
+    }
+
+    private resolveMsdfShaderUrl(shaderUrl: string | null | undefined): string {
+        return shaderUrl || DEFAULT_MSDF_SHADER_URL;
+    }
+
+    private resolveFontJsonReference(
+        jsonUrl: string,
+        requestToken: number,
+        syncFontName: boolean = true
+    ): void {
+        const resolvedJsonUrl = normalizeAssetUrl(jsonUrl);
+        const resolvedShaderUrl = this.resolveMsdfShaderUrl(this._fontShaderUrl);
+
+        void Laya.loader
+            .load({ url: resolvedJsonUrl, type: Laya.Loader.JSON })
+            .then((rawData) => {
+                if (this.destroyed || requestToken !== this._fontResolveToken) {
+                    return;
+                }
+
+                const resources = this.resolveFontResourcesFromJsonAsset(
+                    resolvedJsonUrl,
+                    rawData,
+                    resolvedShaderUrl
+                );
+                if (!resources) {
+                    console.warn(
+                        `[MsdfLabel] invalid MSDF font json "${resolvedJsonUrl}". Expected pages[0] to point to the atlas image.`
+                    );
+                    return;
+                }
+
+                if (syncFontName) {
+                    this._fontName = resolvedJsonUrl;
+                }
+                this.applyFontResources(resources);
+            })
+            .catch((error) => {
+                if (this.destroyed || requestToken !== this._fontResolveToken) {
+                    return;
+                }
+
+                console.error(
+                    `[MsdfLabel] failed to resolve font json "${resolvedJsonUrl}"`,
+                    error
+                );
+            });
+    }
+
+    private resolveFontResourcesFromJsonAsset(
+        jsonUrl: string,
+        rawData: unknown,
+        shaderUrl: string
+    ): MsdfFontResourceConfig | null {
+        const fontData = normalizeFontJsonAssetData(rawData);
+        const pages = Array.isArray(fontData?.pages) ? fontData.pages : null;
+        const page = typeof pages?.[0] === "string" ? pages[0] : "";
+        if (!page) {
+            return null;
+        }
+
+        return {
+            textureUrl: resolveAssetUrl(jsonUrl, page),
+            jsonUrl,
+            shaderUrl,
+        };
+    }
+
+    override setVar(name: string, value: unknown): this {
         if (!this._templateVars) {
             this._templateVars = {};
         }
@@ -927,12 +1195,12 @@ export class MsdfLabel extends Laya.UIComponent {
             if (pos3 !== -1) {
                 const value = this._templateVars[tag.substring(0, pos3)];
                 result =
-                    value == null
+                    value === null || value === undefined
                         ? result + tag.substring(pos3 + 1)
                         : this.appendTemplateValue(result, value);
             } else {
                 const value = this._templateVars[tag];
-                if (value != null) {
+                if (value !== null && value !== undefined) {
                     result = this.appendTemplateValue(result, value);
                 }
             }
@@ -1352,18 +1620,18 @@ export class MsdfLabel extends Laya.UIComponent {
     }
 
     private applyFitContentSize(measuredSize: MsdfLabelSize): void {
-        if (this._fitFlag || (this._fitContent !== "yes" && this._fitContent !== "height")) {
+        if (this._msdfFitFlag || (this._fitContent !== "yes" && this._fitContent !== "height")) {
             return;
         }
 
-        this._fitFlag = true;
+        this._msdfFitFlag = true;
         if (this._fitContent === "height") {
             this.set_height(measuredSize.height);
         } else {
             this.set_width(measuredSize.width);
             this.set_height(measuredSize.height);
         }
-        this._fitFlag = false;
+        this._msdfFitFlag = false;
     }
 
     private getViewportContentBox(

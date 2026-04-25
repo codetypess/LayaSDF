@@ -1,7 +1,7 @@
 {
   "scripts": {
     "msdf:30": "tsx ./scripts/generate-msdf-font.ts --font-size 30 --distance-range 6 --padding 1 --font assets/resources/source-han-sans-cn-medium.ttf --charset assets/resources/msdf/demo-charset.txt",
-    "msdf:25": "tsx ./scripts/generate-msdf-font.ts --font-size 25 --distance-range 6 --padding 1 --font assets/resources/source-han-sans-cn-medium.ttf --charset assets/resources/msdf/demo-charset.txt",
+    "msdf:25": "tsx ./scripts/generate-msdf-font.ts --font-size 30 --distance-range 6 --padding 1 --font assets/resources/source-han-sans-cn-medium.ttf --charset assets/resources/msdf/demo-charset.txt",
     "typecheck:scripts": "tsc -p ./scripts/tsconfig.json --noEmit"
   },
   "devDependencies": {
