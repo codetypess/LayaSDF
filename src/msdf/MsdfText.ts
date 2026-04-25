@@ -1181,36 +1181,6 @@ export class MsdfTextSprite extends Laya.Sprite {
         this.refresh();
     }
 
-    private initialize(font: MsdfBitmapFont | null, options: MsdfTextOptions = {}): void {
-        this.font = font;
-        this._text = options.text ?? "";
-        this._fontSize = options.fontSize ?? font?.lineHeight ?? 16;
-        this._letterSpacing = options.letterSpacing ?? 0;
-        this._lineSpacing = 0;
-        this._faceDilate = options.faceDilate ?? 0;
-        this._textColor = options.textColor ?? DEFAULT_TEXT_COLOR.clone();
-        this._underlineColor = options.underlineColor ?? null;
-        this._strikethroughColor = options.strikethroughColor ?? null;
-        this._outlineColor = options.outlineColor ?? DEFAULT_OUTLINE_COLOR.clone();
-        this._outlineWidth = options.outlineWidth ?? 0;
-        this._glowColor = options.glowColor ?? DEFAULT_GLOW_COLOR.clone();
-        this._glowSize = options.glowSize ?? 0;
-        this._shadowColor = options.shadowColor ?? DEFAULT_SHADOW_COLOR.clone();
-        this._shadowOffsetX = options.shadowOffsetX ?? 0;
-        this._shadowOffsetY = options.shadowOffsetY ?? 0;
-        this._shadowBlur = options.shadowBlur ?? 0;
-        this._underline = !!options.underline;
-        this._strikethrough = !!options.strikethrough;
-        this._usesRuns = false;
-        this._runs = [];
-        this._plainTextLayoutDirty = true;
-        this.invalidatePlainTextBatchCache();
-        this.materialInstance = this.font?.renderState.material ?? new Laya.Material();
-        this.material = this.materialInstance;
-        this.syncMaterial();
-        this.refresh();
-    }
-
     get text(): string {
         return this._text;
     }
