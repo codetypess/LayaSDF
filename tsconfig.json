@@ -3,25 +3,26 @@
     "module": "es6",
     "target": "es6",
     "strict": true,
-    "strictNullChecks": false,
     "noEmitHelpers": true,
-    "sourceMap": false,
+    "noImplicitOverride": true,
+    "sourceMap": true,
     "experimentalDecorators": true,
     "skipLibCheck": true,
     "moduleResolution": "node",
     "lib": [
-      "DOM", "ES2017"
+      "es2017",
+      "dom"
     ],
     "allowSyntheticDefaultImports": true,
-    "paths": {
-      "~/packages/*": [
-        "./library/packages/*"
-      ]
-    }
+    "types": []
   },
   "include": [
     "./assets",
     "./src",
     "./engine"
-  ]
+  ],
+  "exclude": [
+    "assets/plugins"
+  ],
+  "typescript.experimental.useTsgo": true
 }

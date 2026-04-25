@@ -4,6 +4,7 @@
     "msdf:25": "node ./scripts/generate-msdf-font.mjs --font-size 25 --distance-range 6 --padding 1 --font assets/resources/source-han-sans-cn-medium.ttf --charset assets/resources/msdf/demo-charset.txt"
   },
   "devDependencies": {
-    "msdf-bmfont-xml": "^2.8.0"
+    "msdf-bmfont-xml": "^2.8.0",
+    "prettier": "^3.8.3"
   }
 }

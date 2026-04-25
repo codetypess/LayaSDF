@@ -307,7 +307,9 @@ const DECORATION_SOURCE_CHAR_CODE = 0xe000;
 const DECORATION_SOURCE_CHAR = String.fromCodePoint(DECORATION_SOURCE_CHAR_CODE);
 const emojiTest = /[\uD800-\uDBFF][\uDC00-\uDFFF]/;
 const wordBoundaryTest = /[a-zA-Z0-9\!-\+\/_]+$/;
-const punctuationChars = new Set(Array.from(".,，。、!！；;”’)）]】}》").map(char => char.charCodeAt(0)));
+const punctuationChars = new Set(
+    Array.from(".,，。、!！；;”’)）]】}》").map((char) => char.charCodeAt(0))
+);
 const maxWordLength = 20;
 const KERNING_KEY_MULTIPLIER = 0x110000;
 const PACKED_EFFECT_SIZE_MAX = 32;
@@ -328,7 +330,7 @@ function createEmptyLayout(): MsdfLayout {
         indices: new Uint16Array(0),
         quadKinds: new Uint8Array(0),
         width: 0,
-        height: 0
+        height: 0,
     };
 }
 
@@ -350,7 +352,7 @@ function createEmptyPlainTextBatchCache(): MsdfPlainTextBatchCache {
         glowColors: null,
         shadowColors: null,
         packedParamsA: null,
-        packedParamsB: null
+        packedParamsB: null,
     };
 }
 
@@ -368,7 +370,7 @@ function createBatchGroup(batch: MsdfDrawBatch): MsdfDrawBatchGroup {
         vertexFloatCount: batch.vertices.length,
         uvFloatCount: batch.uvs.length,
         indexCount: batch.indices.length,
-        vertexCount: batch.vertices.length >> 1
+        vertexCount: batch.vertices.length >> 1,
     };
 }
 
@@ -383,7 +385,7 @@ function finalizeBatchGroup(group: MsdfDrawBatchGroup): MsdfDrawBatch {
             glowColors: group.glowColorChunks[0],
             shadowColors: group.shadowColorChunks[0],
             packedParamsA: group.packedParamAChunks[0],
-            packedParamsB: group.packedParamBChunks[0]
+            packedParamsB: group.packedParamBChunks[0],
         };
     }
 
@@ -442,11 +444,14 @@ function finalizeBatchGroup(group: MsdfDrawBatchGroup): MsdfDrawBatch {
         glowColors,
         shadowColors,
         packedParamsA,
-        packedParamsB
+        packedParamsB,
     };
 }
 
-function appendBatchGroup(groups: MsdfDrawBatch[], pendingGroup: MsdfDrawBatchGroup | null): MsdfDrawBatchGroup | null {
+function appendBatchGroup(
+    groups: MsdfDrawBatch[],
+    pendingGroup: MsdfDrawBatchGroup | null
+): MsdfDrawBatchGroup | null {
     if (pendingGroup) {
         groups.push(finalizeBatchGroup(pendingGroup));
     }
@@ -483,10 +488,14 @@ function styleSkewExtra(height: number, style: MsdfRichTextStyle): number {
         return 0;
     }
 
-    return Math.tan(ITALIC_SKEW_DEGREES * Math.PI / 180) * height;
+    return Math.tan((ITALIC_SKEW_DEGREES * Math.PI) / 180) * height;
 }
 
-function alignItemsOffset(lineHeight: number, cmdHeight: number, alignItems: string | null | undefined): number {
+function alignItemsOffset(
+    lineHeight: number,
+    cmdHeight: number,
+    alignItems: string | null | undefined
+): number {
     if (alignItems === "bottom") {
         return Math.floor(lineHeight - cmdHeight);
     }
@@ -530,11 +539,12 @@ function createLayoutColorArray(
 
     for (let i = 0; i < layout.quadKinds.length; i++) {
         const vertexOffset = i * 4;
-        const packedColor = layout.quadKinds[i] === QUAD_KIND_UNDERLINE
-            ? underlinePacked
-            : layout.quadKinds[i] === QUAD_KIND_STRIKETHROUGH
-                ? strikethroughPacked
-                : defaultPacked;
+        const packedColor =
+            layout.quadKinds[i] === QUAD_KIND_UNDERLINE
+                ? underlinePacked
+                : layout.quadKinds[i] === QUAD_KIND_STRIKETHROUGH
+                  ? strikethroughPacked
+                  : defaultPacked;
 
         values[vertexOffset] = packedColor;
         values[vertexOffset + 1] = packedColor;
@@ -545,7 +555,12 @@ function createLayoutColorArray(
     return values;
 }
 
-function scaleVertices(source: Float32Array, scale: number, offsetX: number = 0, offsetY: number = 0): Float32Array {
+function scaleVertices(
+    source: Float32Array,
+    scale: number,
+    offsetX: number = 0,
+    offsetY: number = 0
+): Float32Array {
     const vertices = new Float32Array(source.length);
     for (let i = 0; i < source.length; i += 2) {
         vertices[i] = source[i] * scale + offsetX;
@@ -559,7 +574,7 @@ function packNormalizedByte(value: number, maxValue: number): number {
         return 0;
     }
 
-    return Math.max(0, Math.min(255, Math.round(value / maxValue * 255)));
+    return Math.max(0, Math.min(255, Math.round((value / maxValue) * 255)));
 }
 
 function packSignedNormalizedByte(value: number, maxValue: number): number {
@@ -576,7 +591,16 @@ function packSignedByte(value: number): number {
     return rounded & 0xff;
 }
 
-function effectFlags(outlineWidth: number, outlineColor: Laya.Vector4, glowSize: number, glowColor: Laya.Vector4, shadowOffsetX: number, shadowOffsetY: number, shadowBlur: number, shadowColor: Laya.Vector4): number {
+function effectFlags(
+    outlineWidth: number,
+    outlineColor: Laya.Vector4,
+    glowSize: number,
+    glowColor: Laya.Vector4,
+    shadowOffsetX: number,
+    shadowOffsetY: number,
+    shadowBlur: number,
+    shadowColor: Laya.Vector4
+): number {
     let flags = 0;
 
     if (outlineWidth > 0 && outlineColor.w > 0) {
@@ -594,35 +618,53 @@ function effectFlags(outlineWidth: number, outlineColor: Laya.Vector4, glowSize:
     return flags;
 }
 
-function createPackedParamsAArray(outlineWidth: number, glowSize: number, shadowBlur: number, faceDilate: number, vertexCount: number): Uint32Array {
+function createPackedParamsAArray(
+    outlineWidth: number,
+    glowSize: number,
+    shadowBlur: number,
+    faceDilate: number,
+    vertexCount: number
+): Uint32Array {
     const values = new Uint32Array(vertexCount);
     const packed = packParamsAValue(outlineWidth, glowSize, shadowBlur, faceDilate);
     values.fill(packed);
     return values;
 }
 
-function createPackedParamsBArray(shadowOffsetX: number, shadowOffsetY: number, flags: number, vertexCount: number): Uint32Array {
+function createPackedParamsBArray(
+    shadowOffsetX: number,
+    shadowOffsetY: number,
+    flags: number,
+    vertexCount: number
+): Uint32Array {
     const values = new Uint32Array(vertexCount);
     const packed = packParamsBValue(shadowOffsetX, shadowOffsetY, flags);
     values.fill(packed);
     return values;
 }
 
-function packParamsAValue(outlineWidth: number, glowSize: number, shadowBlur: number, faceDilate: number): number {
+function packParamsAValue(
+    outlineWidth: number,
+    glowSize: number,
+    shadowBlur: number,
+    faceDilate: number
+): number {
     return (
-        packNormalizedByte(outlineWidth, PACKED_EFFECT_SIZE_MAX)
-        | (packNormalizedByte(glowSize, PACKED_EFFECT_SIZE_MAX) << 8)
-        | (packNormalizedByte(shadowBlur, PACKED_EFFECT_SIZE_MAX) << 16)
-        | (packSignedNormalizedByte(faceDilate, PACKED_FACE_DILATE_MAX) << 24)
-    ) >>> 0;
+        (packNormalizedByte(outlineWidth, PACKED_EFFECT_SIZE_MAX) |
+            (packNormalizedByte(glowSize, PACKED_EFFECT_SIZE_MAX) << 8) |
+            (packNormalizedByte(shadowBlur, PACKED_EFFECT_SIZE_MAX) << 16) |
+            (packSignedNormalizedByte(faceDilate, PACKED_FACE_DILATE_MAX) << 24)) >>>
+        0
+    );
 }
 
 function packParamsBValue(shadowOffsetX: number, shadowOffsetY: number, flags: number): number {
     return (
-        packSignedByte(shadowOffsetX * PACKED_SHADOW_OFFSET_SCALE)
-        | (packSignedByte(shadowOffsetY * PACKED_SHADOW_OFFSET_SCALE) << 8)
-        | ((flags & 0xff) << 16)
-    ) >>> 0;
+        (packSignedByte(shadowOffsetX * PACKED_SHADOW_OFFSET_SCALE) |
+            (packSignedByte(shadowOffsetY * PACKED_SHADOW_OFFSET_SCALE) << 8) |
+            ((flags & 0xff) << 16)) >>>
+        0
+    );
 }
 
 function isHighSurrogate(code: number): boolean {
@@ -669,7 +711,7 @@ function normalizeFontJson(raw: unknown): MsdfFontJson {
     let data = raw;
 
     if (data && typeof data === "object" && "data" in data) {
-        data = (data as { data: unknown; }).data;
+        data = (data as { data: unknown }).data;
     }
 
     if (typeof data === "string") {
@@ -702,7 +744,7 @@ export class MsdfBitmapFont {
     static async load(textureUrl: string, jsonUrl: string): Promise<MsdfBitmapFont> {
         const resources = await Laya.loader.load([
             { url: textureUrl, type: Laya.Loader.IMAGE },
-            { url: jsonUrl, type: Laya.Loader.JSON }
+            { url: jsonUrl, type: Laya.Loader.JSON },
         ]);
 
         if (!Array.isArray(resources) || !resources[0]) {
@@ -712,7 +754,10 @@ export class MsdfBitmapFont {
         return MsdfBitmapFont.fromResources(resources[0] as Laya.Texture, resources[1]);
     }
 
-    constructor(readonly texture: Laya.Texture, readonly data: MsdfFontJson) {
+    constructor(
+        readonly texture: Laya.Texture,
+        readonly data: MsdfFontJson
+    ) {
         if (!data || !data.common || !Array.isArray(data.chars)) {
             throw new Error(`Invalid MSDF font data: ${JSON.stringify(data)}`);
         }
@@ -741,10 +786,6 @@ export class MsdfBitmapFont {
         return this._renderState;
     }
 
-    createText(options: MsdfTextOptions): MsdfTextSprite {
-        return MsdfTextSprite.create(this, options);
-    }
-
     getLineHeight(fontSize: number): number {
         return this.lineHeight * (fontSize / this.lineHeight);
     }
@@ -765,9 +806,10 @@ export class MsdfBitmapFont {
             }
 
             const glyph = this.glyphs.get(char);
-            const kern = previousCode >= 0 && glyph
-                ? (this.kernings.get(kerningKey(previousCode, glyph.id)) ?? 0) * scale
-                : 0;
+            const kern =
+                previousCode >= 0 && glyph
+                    ? (this.kernings.get(kerningKey(previousCode, glyph.id)) ?? 0) * scale
+                    : 0;
 
             penX += (glyph ? glyph.xadvance * scale : fontSize * 0.5) + kern + scaledLetterSpacing;
             previousCode = glyph?.id ?? -1;
@@ -783,12 +825,22 @@ export class MsdfBitmapFont {
 
         const scale = fontSize / this.lineHeight;
         const baseThickness = Math.max(1, Math.ceil(this.decorationGlyph.height * scale));
-        const thickness = scale >= LARGE_DECORATION_SCALE_THRESHOLD
-            ? baseThickness + LARGE_DECORATION_THICKNESS_BOOST
-            : baseThickness;
+        const thickness =
+            scale >= LARGE_DECORATION_SCALE_THRESHOLD
+                ? baseThickness + LARGE_DECORATION_THICKNESS_BOOST
+                : baseThickness;
         const leftOverhang = Math.min(0, this.decorationGlyph.xoffset * scale);
-        const rightOverhang = Math.max(0, (this.decorationGlyph.xoffset + this.decorationGlyph.width - this.decorationGlyph.xadvance) * scale);
-        const underlineOffset = Math.max(UNDERLINE_EXTRA_OFFSET_MIN, scale * UNDERLINE_EXTRA_OFFSET_SCALE);
+        const rightOverhang = Math.max(
+            0,
+            (this.decorationGlyph.xoffset +
+                this.decorationGlyph.width -
+                this.decorationGlyph.xadvance) *
+                scale
+        );
+        const underlineOffset = Math.max(
+            UNDERLINE_EXTRA_OFFSET_MIN,
+            scale * UNDERLINE_EXTRA_OFFSET_SCALE
+        );
         const underlineTop = Math.round(this.decorationGlyph.yoffset * scale + underlineOffset);
 
         return {
@@ -796,7 +848,7 @@ export class MsdfBitmapFont {
             rightOverhang,
             underlineTop,
             underlineBottom: underlineTop + thickness,
-            thickness
+            thickness,
         };
     }
 
@@ -806,7 +858,9 @@ export class MsdfBitmapFont {
         }
 
         this._missingDecorationGlyphReported = true;
-        console.error(`[MsdfBitmapFont] decoration glyph U+${DECORATION_SOURCE_CHAR_CODE.toString(16).toUpperCase()} is missing from the atlas; underline/strikethrough will not render.`);
+        console.error(
+            `[MsdfBitmapFont] decoration glyph U+${DECORATION_SOURCE_CHAR_CODE.toString(16).toUpperCase()} is missing from the atlas; underline/strikethrough will not render.`
+        );
     }
 
     wrapText(text: string, fontSize: number, maxWidth: number, letterSpacing: number = 0): string {
@@ -830,9 +884,10 @@ export class MsdfBitmapFont {
 
             const glyph = this.glyphs.get(char);
             const advance = glyph ? glyph.xadvance * scale : fontSize * 0.5;
-            const kern = previousCode >= 0 && glyph
-                ? (this.kernings.get(kerningKey(previousCode, glyph.id)) ?? 0) * scale
-                : 0;
+            const kern =
+                previousCode >= 0 && glyph
+                    ? (this.kernings.get(kerningKey(previousCode, glyph.id)) ?? 0) * scale
+                    : 0;
             const nextWidth = lineWidth + kern + advance + scaledLetterSpacing;
 
             if (lineWidth > 0 && nextWidth > maxWidth) {
@@ -842,14 +897,21 @@ export class MsdfBitmapFont {
             }
 
             result += char;
-            lineWidth += (glyph ? glyph.xadvance * scale : fontSize * 0.5) + kern + scaledLetterSpacing;
+            lineWidth +=
+                (glyph ? glyph.xadvance * scale : fontSize * 0.5) + kern + scaledLetterSpacing;
             previousCode = glyph?.id ?? -1;
         }
 
         return result;
     }
 
-    buildLayout(text: string, fontSize: number, letterSpacing: number = 0, lineSpacing: number = 0, decorations: MsdfDecorationOptions = {}): MsdfLayout {
+    buildLayout(
+        text: string,
+        fontSize: number,
+        letterSpacing: number = 0,
+        lineSpacing: number = 0,
+        decorations: MsdfDecorationOptions = {}
+    ): MsdfLayout {
         // 先把文本转换成可复用的四边形布局。这个阶段只负责生成本地字形几何，
         // 不处理裁剪、滚动、发光/阴影叠加顺序，也不关心最终屏幕上的偏移。
         const scale = fontSize / this.lineHeight;
@@ -859,13 +921,13 @@ export class MsdfBitmapFont {
         const indices: number[] = [];
         const quadKinds: number[] = [];
         const lineHeight = this.lineHeight * scale;
-        const lineInfos: Array<{ y: number; advanceWidth: number; left: number; right: number; }> = [
+        const lineInfos: Array<{ y: number; advanceWidth: number; left: number; right: number }> = [
             {
                 y: 0,
                 advanceWidth: 0,
                 left: Number.POSITIVE_INFINITY,
-                right: Number.NEGATIVE_INFINITY
-            }
+                right: Number.NEGATIVE_INFINITY,
+            },
         ];
 
         let penX = 0;
@@ -881,31 +943,32 @@ export class MsdfBitmapFont {
         let previousCode = -1;
         let lineIndex = 0;
 
-        const pushQuad = (glyph: MsdfGlyph, left: number, top: number, right: number, bottom: number, quadKind: number = QUAD_KIND_TEXT): void => {
+        const pushQuad = (
+            glyph: MsdfGlyph,
+            left: number,
+            top: number,
+            right: number,
+            bottom: number,
+            quadKind: number = QUAD_KIND_TEXT
+        ): void => {
             // 每个字形或装饰线最终都对应一个带 UV 的四边形。
             const u0 = glyph.x / this.atlasWidth;
             const v0 = glyph.y / this.atlasHeight;
             const u1 = (glyph.x + glyph.width) / this.atlasWidth;
             const v1 = (glyph.y + glyph.height) / this.atlasHeight;
 
-            vertices.push(
-                left, top,
-                right, top,
-                right, bottom,
-                left, bottom
-            );
+            vertices.push(left, top, right, top, right, bottom, left, bottom);
 
-            uvs.push(
-                u0, v0,
-                u1, v0,
-                u1, v1,
-                u0, v1
-            );
+            uvs.push(u0, v0, u1, v0, u1, v1, u0, v1);
 
             const vertexOffset = quadCount * 4;
             indices.push(
-                vertexOffset, vertexOffset + 1, vertexOffset + 2,
-                vertexOffset, vertexOffset + 2, vertexOffset + 3
+                vertexOffset,
+                vertexOffset + 1,
+                vertexOffset + 2,
+                vertexOffset,
+                vertexOffset + 2,
+                vertexOffset + 3
             );
             quadKinds.push(quadKind);
 
@@ -930,7 +993,7 @@ export class MsdfBitmapFont {
                     y: penY,
                     advanceWidth: 0,
                     left: Number.POSITIVE_INFINITY,
-                    right: Number.NEGATIVE_INFINITY
+                    right: Number.NEGATIVE_INFINITY,
                 });
                 continue;
             }
@@ -989,12 +1052,26 @@ export class MsdfBitmapFont {
 
                     if (decorations.underline) {
                         const top = line.y + decorationMetrics.underlineTop;
-                        pushQuad(decorationGlyph, lineLeft, top, lineRight, top + decorationMetrics.thickness, QUAD_KIND_UNDERLINE);
+                        pushQuad(
+                            decorationGlyph,
+                            lineLeft,
+                            top,
+                            lineRight,
+                            top + decorationMetrics.thickness,
+                            QUAD_KIND_UNDERLINE
+                        );
                     }
 
                     if (decorations.strikethrough) {
                         const top = line.y + lineHeight * 0.5 - decorationMetrics.thickness * 0.5;
-                        pushQuad(decorationGlyph, lineLeft, top, lineRight, top + decorationMetrics.thickness, QUAD_KIND_STRIKETHROUGH);
+                        pushQuad(
+                            decorationGlyph,
+                            lineLeft,
+                            top,
+                            lineRight,
+                            top + decorationMetrics.thickness,
+                            QUAD_KIND_STRIKETHROUGH
+                        );
                     }
                 }
             }
@@ -1007,7 +1084,7 @@ export class MsdfBitmapFont {
                 indices: new Uint16Array(0),
                 quadKinds: new Uint8Array(0),
                 width: widestLine,
-                height: lineCount * lineHeight + Math.max(0, lineCount - 1) * lineSpacing
+                height: lineCount * lineHeight + Math.max(0, lineCount - 1) * lineSpacing,
             };
         }
 
@@ -1027,18 +1104,15 @@ export class MsdfBitmapFont {
             indices: new Uint16Array(indices),
             quadKinds: new Uint8Array(quadKinds),
             width: Math.max(widestLine, maxX - minX),
-            height: Math.max(lineCount * lineHeight + Math.max(0, lineCount - 1) * lineSpacing, maxY - shiftY)
+            height: Math.max(
+                lineCount * lineHeight + Math.max(0, lineCount - 1) * lineSpacing,
+                maxY - shiftY
+            ),
         };
     }
 }
 
 export class MsdfTextSprite extends Laya.Sprite {
-    static create(font: MsdfBitmapFont, options: MsdfTextOptions = {}): MsdfTextSprite {
-        const sprite = new MsdfTextSprite();
-        sprite.initialize(font, options);
-        return sprite;
-    }
-
     private font: MsdfBitmapFont | null = null;
     private materialInstance: Laya.Material;
 
@@ -1074,7 +1148,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         clipRectX: 0,
         clipRectY: 0,
         clipRectWidth: NO_CONSTRAINT,
-        clipRectHeight: NO_CONSTRAINT
+        clipRectHeight: NO_CONSTRAINT,
     };
     private _defaultAlign = "left";
     private _alignItems = "middle";
@@ -1089,11 +1163,11 @@ export class MsdfTextSprite extends Laya.Sprite {
     private _plainTextBatchCache: MsdfPlainTextBatchCache = createEmptyPlainTextBatchCache();
     private _richTextClickAreas: MsdfRichTextClickArea[] = [];
     private _richTextClickListening = false;
-    private _richTextClickSavedHitArea: Laya.IHitArea | null = null;
+    private _richTextClickSavedHitArea!: Laya.IHitArea;
     private _richTextClickSavedMouseEnabled = false;
     private _richTextClickSavedMouseThrough = true;
     private readonly _richTextHitArea: Laya.IHitArea = {
-        contains: (x: number, y: number): boolean => this.hitRichTextClickArea(x, y) !== null
+        contains: (x: number, y: number): boolean => this.hitRichTextClickArea(x, y) !== null,
     };
 
     constructor() {
@@ -1101,6 +1175,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         this.materialInstance = new Laya.Material();
         this.material = this.materialInstance;
         this.mouseThrough = true;
+        this._richTextClickSavedHitArea = this.hitArea;
 
         this.syncMaterial();
         this.refresh();
@@ -1319,7 +1394,16 @@ export class MsdfTextSprite extends Laya.Sprite {
         this.refreshAfterEffectChange(false);
     }
 
-    setViewportFrame(viewportWidth: number, viewportHeight: number, drawOffsetX: number, drawOffsetY: number, clipRectX: number, clipRectY: number, clipRectWidth: number, clipRectHeight: number): void {
+    setViewportFrame(
+        viewportWidth: number,
+        viewportHeight: number,
+        drawOffsetX: number,
+        drawOffsetY: number,
+        clipRectX: number,
+        clipRectY: number,
+        clipRectWidth: number,
+        clipRectHeight: number
+    ): void {
         const nextFrame = this.createViewFrame(
             viewportWidth,
             viewportHeight,
@@ -1363,9 +1447,13 @@ export class MsdfTextSprite extends Laya.Sprite {
 
     resetFont(font: MsdfBitmapFont): void {
         this.font = font;
-        this.materialInstance = this.font.renderState.material;
+        this.materialInstance = font.renderState.material;
         this.material = this.materialInstance;
         this.refreshAfterPlainTextLayoutChange(true);
+    }
+
+    private requireFont(): MsdfBitmapFont {
+        return this.font!;
     }
 
     private refreshAfterPlainTextLayoutChange(invalidateBatchCache: boolean = false): void {
@@ -1410,7 +1498,16 @@ export class MsdfTextSprite extends Laya.Sprite {
         this.refresh();
     }
 
-    private createViewFrame(viewportWidth: number, viewportHeight: number, drawOffsetX: number, drawOffsetY: number, clipRectX: number, clipRectY: number, clipRectWidth: number, clipRectHeight: number): MsdfViewFrame {
+    private createViewFrame(
+        viewportWidth: number,
+        viewportHeight: number,
+        drawOffsetX: number,
+        drawOffsetY: number,
+        clipRectX: number,
+        clipRectY: number,
+        clipRectWidth: number,
+        clipRectHeight: number
+    ): MsdfViewFrame {
         return {
             width: Math.max(0, viewportWidth),
             height: Math.max(0, viewportHeight),
@@ -1419,7 +1516,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             clipRectX: clipRectX || 0,
             clipRectY: clipRectY || 0,
             clipRectWidth: Math.max(0, clipRectWidth),
-            clipRectHeight: Math.max(0, clipRectHeight)
+            clipRectHeight: Math.max(0, clipRectHeight),
         };
     }
 
@@ -1444,14 +1541,16 @@ export class MsdfTextSprite extends Laya.Sprite {
     }
 
     private sameViewFrame(left: MsdfViewFrame, right: MsdfViewFrame): boolean {
-        return left.width === right.width
-            && left.height === right.height
-            && left.drawOffsetX === right.drawOffsetX
-            && left.drawOffsetY === right.drawOffsetY
-            && left.clipRectX === right.clipRectX
-            && left.clipRectY === right.clipRectY
-            && left.clipRectWidth === right.clipRectWidth
-            && left.clipRectHeight === right.clipRectHeight;
+        return (
+            left.width === right.width &&
+            left.height === right.height &&
+            left.drawOffsetX === right.drawOffsetX &&
+            left.drawOffsetY === right.drawOffsetY &&
+            left.clipRectX === right.clipRectX &&
+            left.clipRectY === right.clipRectY &&
+            left.clipRectWidth === right.clipRectWidth &&
+            left.clipRectHeight === right.clipRectHeight
+        );
     }
 
     private getViewWidth(): number {
@@ -1493,15 +1592,16 @@ export class MsdfTextSprite extends Laya.Sprite {
 
     private getPlainTextLayout(): MsdfLayout {
         // 纯文本布局只会在真正影响字形形状的属性变化时重建。
+        const font = this.requireFont();
         if (this._plainTextLayoutDirty) {
-            this._layout = this.font.buildLayout(
+            this._layout = font.buildLayout(
                 this._text,
                 this._fontSize,
                 this._letterSpacing,
                 this._lineSpacing,
                 {
                     underline: this._underline,
-                    strikethrough: this._strikethrough
+                    strikethrough: this._strikethrough,
                 }
             );
             this._plainTextLayoutDirty = false;
@@ -1511,7 +1611,11 @@ export class MsdfTextSprite extends Laya.Sprite {
         return this._layout;
     }
 
-    private getPlainTextBatchStyleData(layout: MsdfLayout, vertexCount: number, flags: number): MsdfBatchStyleData {
+    private getPlainTextBatchStyleData(
+        layout: MsdfLayout,
+        vertexCount: number,
+        flags: number
+    ): MsdfBatchStyleData {
         // layout 已经标明了哪些 quad 是正文、下划线或删除线。
         // 这里把高层样式参数一次性展开成按顶点存储的打包数组，供 drawTrianglesMSDF 直接消费。
         const cache = this._plainTextBatchCache;
@@ -1523,30 +1627,57 @@ export class MsdfTextSprite extends Laya.Sprite {
         const nextCache = this._plainTextBatchCache;
         const fillDefaultPacked = packVertexColor(this._textColor);
         const fillUnderlinePacked = packVertexColor(this._underlineColor ?? this._textColor);
-        const fillStrikethroughPacked = packVertexColor(this._strikethroughColor ?? this._textColor);
+        const fillStrikethroughPacked = packVertexColor(
+            this._strikethroughColor ?? this._textColor
+        );
         const outlineDefaultPacked = packVertexColor(this._outlineColor);
         const outlineUnderlinePacked = packVertexColor(this._underlineColor ?? this._outlineColor);
-        const outlineStrikethroughPacked = packVertexColor(this._strikethroughColor ?? this._outlineColor);
+        const outlineStrikethroughPacked = packVertexColor(
+            this._strikethroughColor ?? this._outlineColor
+        );
         const glowPacked = packVertexColor(this._glowColor);
         const shadowPacked = packVertexColor(this._shadowColor);
-        const packedParamsAValue = packParamsAValue(this._outlineWidth, this._glowSize, this._shadowBlur, this._faceDilate);
-        const packedParamsBValue = packParamsBValue(this._shadowOffsetX, this._shadowOffsetY, flags);
+        const packedParamsAValue = packParamsAValue(
+            this._outlineWidth,
+            this._glowSize,
+            this._shadowBlur,
+            this._faceDilate
+        );
+        const packedParamsBValue = packParamsBValue(
+            this._shadowOffsetX,
+            this._shadowOffsetY,
+            flags
+        );
 
-        if (!nextCache.fillColors
-            || nextCache.fillDefaultPacked !== fillDefaultPacked
-            || nextCache.fillUnderlinePacked !== fillUnderlinePacked
-            || nextCache.fillStrikethroughPacked !== fillStrikethroughPacked) {
-            nextCache.fillColors = createLayoutColorArray(layout, this._textColor, this._underlineColor, this._strikethroughColor);
+        if (
+            !nextCache.fillColors ||
+            nextCache.fillDefaultPacked !== fillDefaultPacked ||
+            nextCache.fillUnderlinePacked !== fillUnderlinePacked ||
+            nextCache.fillStrikethroughPacked !== fillStrikethroughPacked
+        ) {
+            nextCache.fillColors = createLayoutColorArray(
+                layout,
+                this._textColor,
+                this._underlineColor,
+                this._strikethroughColor
+            );
             nextCache.fillDefaultPacked = fillDefaultPacked;
             nextCache.fillUnderlinePacked = fillUnderlinePacked;
             nextCache.fillStrikethroughPacked = fillStrikethroughPacked;
         }
 
-        if (!nextCache.outlineColors
-            || nextCache.outlineDefaultPacked !== outlineDefaultPacked
-            || nextCache.outlineUnderlinePacked !== outlineUnderlinePacked
-            || nextCache.outlineStrikethroughPacked !== outlineStrikethroughPacked) {
-            nextCache.outlineColors = createLayoutColorArray(layout, this._outlineColor, this._underlineColor, this._strikethroughColor);
+        if (
+            !nextCache.outlineColors ||
+            nextCache.outlineDefaultPacked !== outlineDefaultPacked ||
+            nextCache.outlineUnderlinePacked !== outlineUnderlinePacked ||
+            nextCache.outlineStrikethroughPacked !== outlineStrikethroughPacked
+        ) {
+            nextCache.outlineColors = createLayoutColorArray(
+                layout,
+                this._outlineColor,
+                this._underlineColor,
+                this._strikethroughColor
+            );
             nextCache.outlineDefaultPacked = outlineDefaultPacked;
             nextCache.outlineUnderlinePacked = outlineUnderlinePacked;
             nextCache.outlineStrikethroughPacked = outlineStrikethroughPacked;
@@ -1563,12 +1694,23 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
 
         if (!nextCache.packedParamsA || nextCache.packedParamsAValue !== packedParamsAValue) {
-            nextCache.packedParamsA = createPackedParamsAArray(this._outlineWidth, this._glowSize, this._shadowBlur, this._faceDilate, vertexCount);
+            nextCache.packedParamsA = createPackedParamsAArray(
+                this._outlineWidth,
+                this._glowSize,
+                this._shadowBlur,
+                this._faceDilate,
+                vertexCount
+            );
             nextCache.packedParamsAValue = packedParamsAValue;
         }
 
         if (!nextCache.packedParamsB || nextCache.packedParamsBValue !== packedParamsBValue) {
-            nextCache.packedParamsB = createPackedParamsBArray(this._shadowOffsetX, this._shadowOffsetY, flags, vertexCount);
+            nextCache.packedParamsB = createPackedParamsBArray(
+                this._shadowOffsetX,
+                this._shadowOffsetY,
+                flags,
+                vertexCount
+            );
             nextCache.packedParamsBValue = packedParamsBValue;
         }
 
@@ -1578,11 +1720,14 @@ export class MsdfTextSprite extends Laya.Sprite {
             glowColors: nextCache.glowColors,
             shadowColors: nextCache.shadowColors,
             packedParamsA: nextCache.packedParamsA,
-            packedParamsB: nextCache.packedParamsB
+            packedParamsB: nextCache.packedParamsB,
         };
     }
 
-    private applyRenderState(drawBatches: MsdfDrawBatch[], layout: MsdfLayout = createEmptyLayout()): void {
+    private applyRenderState(
+        drawBatches: MsdfDrawBatch[],
+        layout: MsdfLayout = createEmptyLayout()
+    ): void {
         this._layout = layout;
         this._drawBatches = drawBatches;
         this.syncViewSize();
@@ -1642,7 +1787,6 @@ export class MsdfTextSprite extends Laya.Sprite {
         this.hitArea = this._richTextClickSavedHitArea;
         this.mouseEnabled = this._richTextClickSavedMouseEnabled;
         this.mouseThrough = this._richTextClickSavedMouseThrough;
-        this._richTextClickSavedHitArea = null;
     }
 
     private isPointInsideActiveClip(x: number, y: number): boolean {
@@ -1650,17 +1794,21 @@ export class MsdfTextSprite extends Laya.Sprite {
             return true;
         }
 
-        const clipWidth = this._viewFrame.clipRectWidth >= 0 ? this._viewFrame.clipRectWidth : this.width;
-        const clipHeight = this._viewFrame.clipRectHeight >= 0 ? this._viewFrame.clipRectHeight : this.height;
+        const clipWidth =
+            this._viewFrame.clipRectWidth >= 0 ? this._viewFrame.clipRectWidth : this.width;
+        const clipHeight =
+            this._viewFrame.clipRectHeight >= 0 ? this._viewFrame.clipRectHeight : this.height;
         const clipX = this._viewFrame.clipRectX;
         const clipY = this._viewFrame.clipRectY;
 
-        return clipWidth > 0
-            && clipHeight > 0
-            && x >= clipX
-            && y >= clipY
-            && x <= clipX + clipWidth
-            && y <= clipY + clipHeight;
+        return (
+            clipWidth > 0 &&
+            clipHeight > 0 &&
+            x >= clipX &&
+            y >= clipY &&
+            x <= clipX + clipWidth &&
+            y <= clipY + clipHeight
+        );
     }
 
     private hitRichTextClickArea(x: number, y: number): MsdfRichTextClickArea | null {
@@ -1673,10 +1821,12 @@ export class MsdfTextSprite extends Laya.Sprite {
 
         for (let i = this._richTextClickAreas.length - 1; i >= 0; i--) {
             const area = this._richTextClickAreas[i];
-            if (localX >= area.x
-                && localY >= area.y
-                && localX <= area.x + area.width
-                && localY <= area.y + area.height) {
+            if (
+                localX >= area.x &&
+                localY >= area.y &&
+                localX <= area.x + area.width &&
+                localY <= area.y + area.height
+            ) {
                 return area;
             }
         }
@@ -1698,14 +1848,19 @@ export class MsdfTextSprite extends Laya.Sprite {
             return [];
         }
 
-        return this.scaleLineMetrics(this._text.split("\n").map((lineText, index) => ({
-            x: 0,
-            y: index * (this.font.getLineHeight(this._fontSize) + this._lineSpacing),
-            width: this.font.measureTextWidth(lineText, this._fontSize, this._letterSpacing),
-            height: this.font.getLineHeight(this._fontSize),
-            align: this._defaultAlign,
-            text: lineText
-        })), shrinkScale);
+        const font = this.requireFont();
+
+        return this.scaleLineMetrics(
+            this._text.split("\n").map((lineText, index) => ({
+                x: 0,
+                y: index * (font.getLineHeight(this._fontSize) + this._lineSpacing),
+                width: font.measureTextWidth(lineText, this._fontSize, this._letterSpacing),
+                height: font.getLineHeight(this._fontSize),
+                align: this._defaultAlign,
+                text: lineText,
+            })),
+            shrinkScale
+        );
     }
 
     private getScrollOffsetX(): number {
@@ -1754,17 +1909,19 @@ export class MsdfTextSprite extends Laya.Sprite {
         const flags = this.getEffectFlagsForStyle(this._outlineWidth, this._outlineColor);
         const styleData = this.getPlainTextBatchStyleData(this._layout, vertexCount, flags);
 
-        return [{
-            vertices,
-            uvs: this._layout.uvs,
-            indices: this._layout.indices,
-            fillColors: styleData.fillColors,
-            outlineColors: styleData.outlineColors,
-            glowColors: styleData.glowColors,
-            shadowColors: styleData.shadowColors,
-            packedParamsA: styleData.packedParamsA,
-            packedParamsB: styleData.packedParamsB
-        }];
+        return [
+            {
+                vertices,
+                uvs: this._layout.uvs,
+                indices: this._layout.indices,
+                fillColors: styleData.fillColors,
+                outlineColors: styleData.outlineColors,
+                glowColors: styleData.glowColors,
+                shadowColors: styleData.shadowColors,
+                packedParamsA: styleData.packedParamsA,
+                packedParamsB: styleData.packedParamsB,
+            },
+        ];
     }
 
     private buildPlainTextRefreshResult(): MsdfTextRefreshResult {
@@ -1777,7 +1934,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             contentHeight: this._layout.height * shrinkScale,
             lines: this.buildPlainTextLineMetrics(shrinkScale),
             drawBatches: this.buildPlainTextDrawBatches(shrinkScale),
-            layout: this._layout
+            layout: this._layout,
         };
     }
 
@@ -1789,7 +1946,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             contentWidth: this._contentWidth * shrinkScale,
             contentHeight: this._contentHeight * shrinkScale,
             lines: this.buildRichTextLineMetrics(lines, shrinkScale),
-            drawBatches: this.buildRichTextDrawBatches(lines, shrinkScale)
+            drawBatches: this.buildRichTextDrawBatches(lines, shrinkScale),
         };
     }
 
@@ -1825,25 +1982,28 @@ export class MsdfTextSprite extends Laya.Sprite {
             height: 0,
             cmd: null,
             align: this._defaultAlign,
-            alignItems: this._alignItems
+            alignItems: this._alignItems,
         };
     }
 
     private createRichTextLayoutState(): MsdfRichTextLayoutState {
+        const font = this.requireFont();
+
         return {
             lines: [],
-            rectWidth: this._wordWrapWidth > 0
-                ? this._wordWrapWidth
-                : this._layoutWidth >= 0
-                    ? this._layoutWidth
-                    : Number.MAX_VALUE,
+            rectWidth:
+                this._wordWrapWidth > 0
+                    ? this._wordWrapWidth
+                    : this._layoutWidth >= 0
+                      ? this._layoutWidth
+                      : Number.MAX_VALUE,
             rectHeight: this._layoutHeight >= 0 ? this._layoutHeight : Number.MAX_VALUE,
             metricCache: new WeakMap(),
             lineX: 0,
             lineY: 0,
-            lastHeight: this.font.getLineHeight(this._runs[0]?.style.fontSize ?? this.font.lineHeight),
+            lastHeight: font.getLineHeight(this._runs[0]?.style.fontSize ?? font.lineHeight),
             currentLine: null,
-            lastCmd: null
+            lastCmd: null,
         };
     }
 
@@ -1853,7 +2013,12 @@ export class MsdfTextSprite extends Laya.Sprite {
 
     private rebuildRichTextLine(
         line: MsdfRichTextLine,
-        segments: Array<{ text: string; style: MsdfRichTextStyle; link?: string | null; clickable?: boolean; }>,
+        segments: Array<{
+            text: string;
+            style: MsdfRichTextStyle;
+            link?: string | null;
+            clickable?: boolean;
+        }>,
         fallbackHeight: number,
         metricCache: MsdfRichTextMetricCache
     ): void {
@@ -1882,7 +2047,7 @@ export class MsdfTextSprite extends Laya.Sprite {
                 width: metrics.width,
                 height: cmdHeight,
                 next: null,
-                prev
+                prev,
             };
 
             if (prev) {
@@ -1923,7 +2088,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             width: resolvedMetrics.width,
             height: cmdHeight,
             next: null,
-            prev: state.lastCmd
+            prev: state.lastCmd,
         };
 
         if (!state.currentLine.cmd) {
@@ -1941,7 +2106,10 @@ export class MsdfTextSprite extends Laya.Sprite {
         state.lastHeight = cmdHeight;
     }
 
-    private advanceRichTextLine(state: MsdfRichTextLayoutState, last: boolean = false): MsdfRichTextLine | null {
+    private advanceRichTextLine(
+        state: MsdfRichTextLayoutState,
+        last: boolean = false
+    ): MsdfRichTextLine | null {
         // 结束当前行并推进到下一行。last=true 表示只做收尾，不再创建新行。
         state.lineX = 0;
 
@@ -1960,7 +2128,11 @@ export class MsdfTextSprite extends Laya.Sprite {
         return state.currentLine;
     }
 
-    private splitRichTextCommandAt(cmd: MsdfRichTextCommand, pos: number, metricCache: MsdfRichTextMetricCache): boolean {
+    private splitRichTextCommandAt(
+        cmd: MsdfRichTextCommand,
+        pos: number,
+        metricCache: MsdfRichTextMetricCache
+    ): boolean {
         // 把一个命令从中间切开，常用于把过长的单词或片段拆到下一行。
         const code = cmd.text.charCodeAt(pos);
         if (isLowSurrogate(code)) {
@@ -1985,7 +2157,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             width: this.getRichTextMetrics(tail, cmd.style, metricCache).width,
             height: cmd.height,
             next: cmd.next,
-            prev: cmd
+            prev: cmd,
         };
 
         if (nextCmd.next) {
@@ -1996,7 +2168,10 @@ export class MsdfTextSprite extends Laya.Sprite {
         return true;
     }
 
-    private moveRichTextCommands(state: MsdfRichTextLayoutState, cmd: MsdfRichTextCommand | null): void {
+    private moveRichTextCommands(
+        state: MsdfRichTextLayoutState,
+        cmd: MsdfRichTextCommand | null
+    ): void {
         // 从某个命令开始，把后续命令整体迁移到当前行，避免重新创建和重新测量。
         if (!cmd || !state.currentLine) {
             return;
@@ -2007,7 +2182,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
 
         while (cmd) {
-            const next = cmd.next;
+            const next: MsdfRichTextCommand | null = cmd.next;
             cmd.x = state.lineX;
             cmd.y = 0;
             cmd.next = null;
@@ -2027,7 +2202,13 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
     }
 
-    private getRichTextWrapCharInfo(text: string, index: number, emoji: boolean, style: MsdfRichTextStyle): MsdfRichTextWrapCharInfo {
+    private getRichTextWrapCharInfo(
+        text: string,
+        index: number,
+        emoji: boolean,
+        style: MsdfRichTextStyle
+    ): MsdfRichTextWrapCharInfo {
+        const font = this.requireFont();
         let charText = text.charAt(index);
         const code = charText.charCodeAt(0);
         if (emoji && isHighSurrogate(code) && index + 1 < text.length) {
@@ -2037,11 +2218,17 @@ export class MsdfTextSprite extends Laya.Sprite {
         return {
             text: charText,
             code,
-            width: this.font.measureTextWidth(charText, style.fontSize, this._letterSpacing) * styleScaleX(style)
+            width:
+                font.measureTextWidth(charText, style.fontSize, this._letterSpacing) *
+                styleScaleX(style),
         };
     }
 
-    private tryMoveTrailingWordToNextLine(state: MsdfRichTextLayoutState, currentPartLength: number, isPunctuation: boolean): boolean {
+    private tryMoveTrailingWordToNextLine(
+        state: MsdfRichTextLayoutState,
+        currentPartLength: number,
+        isPunctuation: boolean
+    ): boolean {
         let cmd: MsdfRichTextCommand | null = state.lastCmd;
         let totalLen = currentPartLength;
         let match: RegExpExecArray | null = null;
@@ -2108,7 +2295,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             wordWidth,
             charWidth,
             remainWidth,
-            continueLoop: false
+            continueLoop: false,
         };
 
         if (!noBreakWord) {
@@ -2116,29 +2303,44 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
 
         let isPunctuation = false;
-        if (!((charInfo.code >= 65 && charInfo.code <= 90)
-            || (charInfo.code >= 97 && charInfo.code <= 122)
-            || (charInfo.code >= 48 && charInfo.code <= 57)
-            || (isPunctuation = punctuationChars.has(charInfo.code)))) {
+        if (
+            !(
+                (charInfo.code >= 65 && charInfo.code <= 90) ||
+                (charInfo.code >= 97 && charInfo.code <= 122) ||
+                (charInfo.code >= 48 && charInfo.code <= 57) ||
+                (isPunctuation = punctuationChars.has(charInfo.code))
+            )
+        ) {
             return result;
         }
 
         const wordBoundary = part.length > 0 ? (wordBoundaryTest.exec(part)?.index ?? null) : 0;
-        if (wordBoundary > 0) {
+        if (wordBoundary != null && wordBoundary > 0) {
             if (wordBoundary > part.length - maxWordLength) {
                 result.index = startIndex + wordBoundary;
                 result.part = text.substring(startIndex, result.index);
-                result.wordWidth = this.getRichTextMetrics(result.part, style, state.metricCache).width;
+                result.wordWidth = this.getRichTextMetrics(
+                    result.part,
+                    style,
+                    state.metricCache
+                ).width;
                 result.charWidth = null;
             }
             return result;
         }
 
         if (wordBoundary != null && state.lastCmd != null) {
-            const movedToNewLine = this.tryMoveTrailingWordToNextLine(state, part.length, isPunctuation);
+            const movedToNewLine = this.tryMoveTrailingWordToNextLine(
+                state,
+                part.length,
+                isPunctuation
+            );
             if (movedToNewLine) {
                 result.remainWidth = state.rectWidth - state.lineX;
-                if (result.charWidth != null && result.wordWidth + result.charWidth < result.remainWidth) {
+                if (
+                    result.charWidth != null &&
+                    result.wordWidth + result.charWidth < result.remainWidth
+                ) {
                     result.wordWidth += result.charWidth;
                     result.continueLoop = true;
                 }
@@ -2147,11 +2349,16 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
 
         if (isPunctuation) {
-            const backup = (emoji && index >= 1 && isLowSurrogate(text.charCodeAt(index - 1))) ? 2 : 1;
+            const backup =
+                emoji && index >= 1 && isLowSurrogate(text.charCodeAt(index - 1)) ? 2 : 1;
             if (index - backup > startIndex || state.lineX > 0) {
                 result.index -= backup;
                 result.part = text.substring(startIndex, result.index);
-                result.wordWidth = this.getRichTextMetrics(result.part, style, state.metricCache).width;
+                result.wordWidth = this.getRichTextMetrics(
+                    result.part,
+                    style,
+                    state.metricCache
+                ).width;
                 result.charWidth = null;
             }
         }
@@ -2176,7 +2383,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             index,
             startIndex: index,
             remainWidth: state.rectWidth,
-            wordWidth: italicExtra + extraWidth
+            wordWidth: italicExtra + extraWidth,
         };
 
         if (charWidth != null) {
@@ -2189,7 +2396,11 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
 
         if (charWidth == null && nextState.index < text.length - 1) {
-            nextState.wordWidth = this.getRichTextMetrics(text.substring(nextState.startIndex, nextState.index + 1), style, state.metricCache).width;
+            nextState.wordWidth = this.getRichTextMetrics(
+                text.substring(nextState.startIndex, nextState.index + 1),
+                style,
+                state.metricCache
+            ).width;
         }
 
         return nextState;
@@ -2260,31 +2471,61 @@ export class MsdfTextSprite extends Laya.Sprite {
             }
 
             if (part.length > 0) {
-                this.appendRichTextCommand(state, part, style, { width: wordWidth, height: styleMetrics.height }, link, clickable);
+                this.appendRichTextCommand(
+                    state,
+                    part,
+                    style,
+                    { width: wordWidth, height: styleMetrics.height },
+                    link,
+                    clickable
+                );
             }
 
-            const advanced = this.advanceWrappedSegmentState(state, text, j, charInfo, charWidth, emoji, style, italicExtra, styleMetrics.extraWidth);
+            const advanced = this.advanceWrappedSegmentState(
+                state,
+                text,
+                j,
+                charInfo,
+                charWidth,
+                emoji,
+                style,
+                italicExtra,
+                styleMetrics.extraWidth
+            );
             j = advanced.index;
             startIndex = advanced.startIndex;
             remainWidth = advanced.remainWidth;
             wordWidth = advanced.wordWidth;
         }
 
-        this.appendRichTextCommand(state, text.substring(startIndex, len), style, undefined, link, clickable);
+        this.appendRichTextCommand(
+            state,
+            text.substring(startIndex, len),
+            style,
+            undefined,
+            link,
+            clickable
+        );
     }
 
-    private buildRichTextLineMetrics(lines: MsdfRichTextLine[], shrinkScale: number): MsdfTextLineMetric[] {
-        return this.scaleLineMetrics(lines.map(line => ({
-            x: 0,
-            y: line.y,
-            width: line.width,
-            height: line.height,
-            align: line.align,
-            text: this.collectLineText(line)
-        })), shrinkScale);
+    private buildRichTextLineMetrics(
+        lines: MsdfRichTextLine[],
+        shrinkScale: number
+    ): MsdfTextLineMetric[] {
+        return this.scaleLineMetrics(
+            lines.map((line) => ({
+                x: 0,
+                y: line.y,
+                width: line.width,
+                height: line.height,
+                align: line.align,
+                text: this.collectLineText(line),
+            })),
+            shrinkScale
+        );
     }
 
-    private measureRichTextLines(lines: MsdfRichTextLine[]): { width: number; height: number; } {
+    private measureRichTextLines(lines: MsdfRichTextLine[]): { width: number; height: number } {
         let width = 0;
         let height = 0;
 
@@ -2296,7 +2537,11 @@ export class MsdfTextSprite extends Laya.Sprite {
         return { width, height };
     }
 
-    private evaluateRichTextShrinkCandidate(wrapWidth: number, widthLimit: number, heightLimit: number): MsdfRichTextShrinkCandidate {
+    private evaluateRichTextShrinkCandidate(
+        wrapWidth: number,
+        widthLimit: number,
+        heightLimit: number
+    ): MsdfRichTextShrinkCandidate {
         this._wordWrapWidth = wrapWidth;
         const lines = this.layoutRuns();
         const contentWidth = this._contentWidth;
@@ -2312,7 +2557,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             widthScale,
             heightScale,
             scale,
-            fillScore: (contentWidth * scale) / widthLimit + (contentHeight * scale) / heightLimit
+            fillScore: (contentWidth * scale) / widthLimit + (contentHeight * scale) / heightLimit,
         };
     }
 
@@ -2325,14 +2570,20 @@ export class MsdfTextSprite extends Laya.Sprite {
             return right;
         }
 
-        if (Math.abs(right.scale - left.scale) <= scaleEpsilon && right.fillScore > left.fillScore) {
+        if (
+            Math.abs(right.scale - left.scale) <= scaleEpsilon &&
+            right.fillScore > left.fillScore
+        ) {
             return right;
         }
 
         return left;
     }
 
-    private isRichTextShrinkCandidateBalanced(candidate: MsdfRichTextShrinkCandidate, scaleEpsilon: number): boolean {
+    private isRichTextShrinkCandidateBalanced(
+        candidate: MsdfRichTextShrinkCandidate,
+        scaleEpsilon: number
+    ): boolean {
         return candidate.widthScale <= candidate.heightScale + scaleEpsilon;
     }
 
@@ -2351,10 +2602,16 @@ export class MsdfTextSprite extends Laya.Sprite {
 
         for (let i = 0; i < 3; i++) {
             rightWidth *= 2;
-            rightCandidate = this.evaluateRichTextShrinkCandidate(rightWidth, widthLimit, heightLimit);
+            rightCandidate = this.evaluateRichTextShrinkCandidate(
+                rightWidth,
+                widthLimit,
+                heightLimit
+            );
             best = this.pickBetterRichTextShrinkCandidate(best, rightCandidate, scaleEpsilon);
-            if (this.isRichTextShrinkCandidateBalanced(rightCandidate, scaleEpsilon)
-                || rightCandidate.scale >= 1 - scaleEpsilon) {
+            if (
+                this.isRichTextShrinkCandidateBalanced(rightCandidate, scaleEpsilon) ||
+                rightCandidate.scale >= 1 - scaleEpsilon
+            ) {
                 break;
             }
         }
@@ -2365,12 +2622,18 @@ export class MsdfTextSprite extends Laya.Sprite {
 
         for (let i = 0; i < 4; i++) {
             const midWidth = (leftWidth + rightWidth) * 0.5;
-            const midCandidate = this.evaluateRichTextShrinkCandidate(midWidth, widthLimit, heightLimit);
+            const midCandidate = this.evaluateRichTextShrinkCandidate(
+                midWidth,
+                widthLimit,
+                heightLimit
+            );
             best = this.pickBetterRichTextShrinkCandidate(best, midCandidate, scaleEpsilon);
 
-            if (Math.abs(midCandidate.widthScale - midCandidate.heightScale) <= balanceEpsilon
-                || midCandidate.scale >= 1 - scaleEpsilon
-                || rightWidth - leftWidth <= 1) {
+            if (
+                Math.abs(midCandidate.widthScale - midCandidate.heightScale) <= balanceEpsilon ||
+                midCandidate.scale >= 1 - scaleEpsilon ||
+                rightWidth - leftWidth <= 1
+            ) {
                 break;
             }
 
@@ -2416,18 +2679,22 @@ export class MsdfTextSprite extends Laya.Sprite {
         return best.lines;
     }
 
-    private getRichTextMetricBucket(style: MsdfRichTextStyle, metricCache: MsdfRichTextMetricCache): MsdfRichTextMetricBucket {
+    private getRichTextMetricBucket(
+        style: MsdfRichTextStyle,
+        metricCache: MsdfRichTextMetricCache
+    ): MsdfRichTextMetricBucket {
+        const font = this.requireFont();
         let bucket = metricCache.get(style);
         if (bucket) {
             return bucket;
         }
 
-        const lineHeight = this.font.getLineHeight(style.fontSize);
+        const lineHeight = font.getLineHeight(style.fontSize);
         let renderHeight = lineHeight;
         let extraWidth = 0;
 
         if (style.underline || style.strikethrough) {
-            const decorationMetrics = this.font.getDecorationRenderMetrics(style.fontSize);
+            const decorationMetrics = font.getDecorationRenderMetrics(style.fontSize);
 
             if (decorationMetrics) {
                 extraWidth = -decorationMetrics.leftOverhang + decorationMetrics.rightOverhang;
@@ -2437,24 +2704,35 @@ export class MsdfTextSprite extends Laya.Sprite {
                 }
 
                 if (style.strikethrough) {
-                    renderHeight = Math.max(renderHeight, lineHeight * 0.5 + decorationMetrics.thickness * 0.5);
+                    renderHeight = Math.max(
+                        renderHeight,
+                        lineHeight * 0.5 + decorationMetrics.thickness * 0.5
+                    );
                 }
             }
         }
 
         bucket = {
             render: { extraWidth, height: renderHeight },
-            text: new Map()
+            text: new Map(),
         };
         metricCache.set(style, bucket);
         return bucket;
     }
 
-    private getRichTextRenderMetrics(style: MsdfRichTextStyle, metricCache: MsdfRichTextMetricCache): { extraWidth: number; height: number; } {
+    private getRichTextRenderMetrics(
+        style: MsdfRichTextStyle,
+        metricCache: MsdfRichTextMetricCache
+    ): { extraWidth: number; height: number } {
         return this.getRichTextMetricBucket(style, metricCache).render;
     }
 
-    private getRichTextMetrics(text: string, style: MsdfRichTextStyle, metricCache: MsdfRichTextMetricCache): MsdfRichTextMetrics {
+    private getRichTextMetrics(
+        text: string,
+        style: MsdfRichTextStyle,
+        metricCache: MsdfRichTextMetricCache
+    ): MsdfRichTextMetrics {
+        const font = this.requireFont();
         const bucket = this.getRichTextMetricBucket(style, metricCache);
         const cached = bucket.text.get(text);
         if (cached) {
@@ -2462,9 +2740,12 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
 
         const metrics = {
-            width: (this.font.measureTextWidth(text, style.fontSize, this._letterSpacing) + bucket.render.extraWidth) * styleScaleX(style)
-                + styleSkewExtra(bucket.render.height, style),
-            height: bucket.render.height
+            width:
+                (font.measureTextWidth(text, style.fontSize, this._letterSpacing) +
+                    bucket.render.extraWidth) *
+                    styleScaleX(style) +
+                styleSkewExtra(bucket.render.height, style),
+            height: bucket.render.height,
         };
         bucket.text.set(text, metrics);
         return metrics;
@@ -2476,16 +2757,27 @@ export class MsdfTextSprite extends Laya.Sprite {
         rectHeight: number,
         lastHeight: number,
         getTextMetrics: (text: string, style: MsdfRichTextStyle) => MsdfRichTextMetrics,
-        rebuildLine: (line: MsdfRichTextLine, segments: Array<{ text: string; style: MsdfRichTextStyle; link?: string | null; clickable?: boolean; }>, fallbackHeight: number) => void,
+        rebuildLine: (
+            line: MsdfRichTextLine,
+            segments: Array<{
+                text: string;
+                style: MsdfRichTextStyle;
+                link?: string | null;
+                clickable?: boolean;
+            }>,
+            fallbackHeight: number
+        ) => void,
         getFallbackStyle: () => MsdfRichTextStyle | null
     ): void {
         if (this._overflow !== "ellipsis" || lines.length === 0) {
             return;
         }
 
+        const font = this.requireFont();
+
         let truncateIndex = -1;
         if (rectHeight < Number.MAX_VALUE) {
-            truncateIndex = lines.findIndex(line => line.y + line.height > rectHeight);
+            truncateIndex = lines.findIndex((line) => line.y + line.height > rectHeight);
             if (truncateIndex === 0) {
                 truncateIndex = 1;
             }
@@ -2512,7 +2804,7 @@ export class MsdfTextSprite extends Laya.Sprite {
                 link: cmd.link ?? null,
                 clickable: !!cmd.clickable,
                 width: metrics.width,
-                height: metrics.height
+                height: metrics.height,
             });
             cmd = cmd.next;
         }
@@ -2564,19 +2856,19 @@ export class MsdfTextSprite extends Laya.Sprite {
                 link: null,
                 clickable: false,
                 width: ellipsisMetrics.width,
-                height: ellipsisMetrics.height
+                height: ellipsisMetrics.height,
             });
         }
 
         rebuildLine(
             lastLine,
-            segments.map(segment => ({
+            segments.map((segment) => ({
                 text: segment.text,
                 style: segment.style,
                 link: segment.link ?? null,
-                clickable: !!segment.clickable
+                clickable: !!segment.clickable,
             })),
-            this.font.getLineHeight(fallbackStyle.fontSize) || lastHeight
+            font.getLineHeight(fallbackStyle.fontSize) || lastHeight
         );
     }
 
@@ -2585,13 +2877,13 @@ export class MsdfTextSprite extends Laya.Sprite {
             return lines;
         }
 
-        return lines.map(line => ({
+        return lines.map((line) => ({
             x: line.x * scale,
             y: line.y * scale,
             width: line.width * scale,
             height: line.height * scale,
             align: line.align,
-            text: line.text
+            text: line.text,
         }));
     }
 
@@ -2628,7 +2920,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             return;
         }
 
-        const renderState = this.font.renderState;
+        const renderState = this.requireFont().renderState;
         if (this.materialInstance !== renderState.material) {
             this.materialInstance = renderState.material;
             this.material = this.materialInstance;
@@ -2646,8 +2938,10 @@ export class MsdfTextSprite extends Laya.Sprite {
         this.syncMaterial();
 
         const needsClip = this._overflow === "hidden" || this._overflow === "scroll";
-        const clipWidth = this._viewFrame.clipRectWidth >= 0 ? this._viewFrame.clipRectWidth : this.width;
-        const clipHeight = this._viewFrame.clipRectHeight >= 0 ? this._viewFrame.clipRectHeight : this.height;
+        const clipWidth =
+            this._viewFrame.clipRectWidth >= 0 ? this._viewFrame.clipRectWidth : this.width;
+        const clipHeight =
+            this._viewFrame.clipRectHeight >= 0 ? this._viewFrame.clipRectHeight : this.height;
         if (needsClip && (clipWidth <= 0 || clipHeight <= 0)) {
             return;
         }
@@ -2655,7 +2949,12 @@ export class MsdfTextSprite extends Laya.Sprite {
         const clipped = needsClip;
         if (clipped) {
             this.graphics.save();
-            this.graphics.clipRect(this._viewFrame.clipRectX, this._viewFrame.clipRectY, clipWidth, clipHeight);
+            this.graphics.clipRect(
+                this._viewFrame.clipRectX,
+                this._viewFrame.clipRectY,
+                clipWidth,
+                clipHeight
+            );
         }
 
         // 顶点始终保持在本地文本坐标里，真正的视口偏移在这里通过 x/y 参数施加。
@@ -2670,9 +2969,11 @@ export class MsdfTextSprite extends Laya.Sprite {
     }
 
     private drawCurrentBatches(drawOffsetX: number, drawOffsetY: number): void {
+        const font = this.requireFont();
+
         for (const batch of this._drawBatches) {
             this.graphics.drawTrianglesMSDF(
-                this.font.texture,
+                font.texture,
                 drawOffsetX,
                 drawOffsetY,
                 batch.vertices,
@@ -2707,7 +3008,11 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
     }
 
-    private appendRichTextRunSegments(state: MsdfRichTextLayoutState, run: MsdfRichTextRun, wordWrap: boolean): void {
+    private appendRichTextRunSegments(
+        state: MsdfRichTextLayoutState,
+        run: MsdfRichTextRun,
+        wordWrap: boolean
+    ): void {
         if (!run.text) {
             return;
         }
@@ -2717,7 +3022,14 @@ export class MsdfTextSprite extends Laya.Sprite {
         const metadata = run as MsdfRichTextRun & MsdfRichTextRunMetadata;
 
         for (let i = 0, n = splitLines.length; i < n; i++) {
-            this.appendRichTextLineText(state, splitLines[i], run.style, wordWrap, metadata.link ?? null, !!metadata.clickable);
+            this.appendRichTextLineText(
+                state,
+                splitLines[i],
+                run.style,
+                wordWrap,
+                metadata.link ?? null,
+                !!metadata.clickable
+            );
 
             if (i !== n - 1) {
                 this.advanceRichTextLine(state);
@@ -2734,7 +3046,8 @@ export class MsdfTextSprite extends Laya.Sprite {
             state.rectHeight,
             state.lastHeight,
             (text, style) => this.getRichTextMetrics(text, style, state.metricCache),
-            (line, segments, fallbackHeight) => this.rebuildRichTextLine(line, segments, fallbackHeight, state.metricCache),
+            (line, segments, fallbackHeight) =>
+                this.rebuildRichTextLine(line, segments, fallbackHeight, state.metricCache),
             () => this.getRichTextFallbackStyle()
         );
 
@@ -2769,7 +3082,11 @@ export class MsdfTextSprite extends Laya.Sprite {
         return this.finalizeRichTextLayout(state);
     }
 
-    private resolveRichTextLineOffsetX(line: MsdfRichTextLine, contentBoxWidth: number, shrinkScale: number): number {
+    private resolveRichTextLineOffsetX(
+        line: MsdfRichTextLine,
+        contentBoxWidth: number,
+        shrinkScale: number
+    ): number {
         const lineAlign = line.align || this._defaultAlign;
         if (lineAlign === "center") {
             return Math.max((contentBoxWidth - line.width * shrinkScale) * 0.5, 0);
@@ -2782,7 +3099,11 @@ export class MsdfTextSprite extends Laya.Sprite {
         return 0;
     }
 
-    private appendMergedBatch(drawBatches: MsdfDrawBatch[], pendingGroup: MsdfDrawBatchGroup | null, batch: MsdfDrawBatch): MsdfDrawBatchGroup {
+    private appendMergedBatch(
+        drawBatches: MsdfDrawBatch[],
+        pendingGroup: MsdfDrawBatchGroup | null,
+        batch: MsdfDrawBatch
+    ): MsdfDrawBatchGroup {
         if (pendingGroup && canMergeBatchGroup(pendingGroup, batch)) {
             mergeBatchGroup(pendingGroup, batch);
             return pendingGroup;
@@ -2796,7 +3117,13 @@ export class MsdfTextSprite extends Laya.Sprite {
         return cmd.link != null || !!cmd.clickable;
     }
 
-    private recordRichTextClickArea(cmd: MsdfRichTextCommand, x: number, y: number, width: number, height: number): void {
+    private recordRichTextClickArea(
+        cmd: MsdfRichTextCommand,
+        x: number,
+        y: number,
+        width: number,
+        height: number
+    ): void {
         if (!this.isRichTextCommandClickable(cmd) || width <= 0 || height <= 0) {
             return;
         }
@@ -2807,7 +3134,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             width,
             height,
             text: cmd.text,
-            link: cmd.link ?? null
+            link: cmd.link ?? null,
         });
     }
 
@@ -2827,15 +3154,15 @@ export class MsdfTextSprite extends Laya.Sprite {
         while (cmd) {
             const x = lineOffsetX + cmd.x * shrinkScale - scrollOffsetX;
             const y = (line.y + cmd.y) * shrinkScale - scrollOffsetY;
-            const batch = this.buildRunBatch(
-                cmd,
-                x,
-                y,
-                layoutCache,
-                shrinkScale
-            );
+            const batch = this.buildRunBatch(cmd, x, y, layoutCache, shrinkScale);
             if (batch) {
-                this.recordRichTextClickArea(cmd, x, y, cmd.width * shrinkScale, cmd.height * shrinkScale);
+                this.recordRichTextClickArea(
+                    cmd,
+                    x,
+                    y,
+                    cmd.width * shrinkScale,
+                    cmd.height * shrinkScale
+                );
                 pendingGroup = this.appendMergedBatch(drawBatches, pendingGroup, batch);
             }
             cmd = cmd.next;
@@ -2844,7 +3171,10 @@ export class MsdfTextSprite extends Laya.Sprite {
         return pendingGroup;
     }
 
-    private buildRichTextDrawBatches(lines: MsdfRichTextLine[], shrinkScale: number): MsdfDrawBatch[] {
+    private buildRichTextDrawBatches(
+        lines: MsdfRichTextLine[],
+        shrinkScale: number
+    ): MsdfDrawBatch[] {
         const contentBoxWidth = this._layoutWidth >= 0 ? this._layoutWidth : this._contentWidth;
         const drawBatches: MsdfDrawBatch[] = [];
         this.clearRichTextClickAreas();
@@ -2872,26 +3202,60 @@ export class MsdfTextSprite extends Laya.Sprite {
         return drawBatches;
     }
 
-    private createRichTextBatchStyleData(layout: MsdfLayout, style: MsdfRichTextStyle, vertexCount: number): MsdfBatchStyleData {
+    private createRichTextBatchStyleData(
+        layout: MsdfLayout,
+        style: MsdfRichTextStyle,
+        vertexCount: number
+    ): MsdfBatchStyleData {
         const flags = this.getEffectFlagsForStyle(style.outlineWidth, style.outlineColor);
 
         return {
-            fillColors: createLayoutColorArray(layout, style.textColor, style.underlineColor, style.strikethroughColor),
-            outlineColors: createLayoutColorArray(layout, style.outlineColor, style.underlineColor, style.strikethroughColor),
+            fillColors: createLayoutColorArray(
+                layout,
+                style.textColor,
+                style.underlineColor,
+                style.strikethroughColor
+            ),
+            outlineColors: createLayoutColorArray(
+                layout,
+                style.outlineColor,
+                style.underlineColor,
+                style.strikethroughColor
+            ),
             glowColors: createVertexColorArray(this._glowColor, vertexCount),
             shadowColors: createVertexColorArray(this._shadowColor, vertexCount),
-            packedParamsA: createPackedParamsAArray(style.outlineWidth, this._glowSize, this._shadowBlur, this._faceDilate, vertexCount),
-            packedParamsB: createPackedParamsBArray(this._shadowOffsetX, this._shadowOffsetY, flags, vertexCount)
+            packedParamsA: createPackedParamsAArray(
+                style.outlineWidth,
+                this._glowSize,
+                this._shadowBlur,
+                this._faceDilate,
+                vertexCount
+            ),
+            packedParamsB: createPackedParamsBArray(
+                this._shadowOffsetX,
+                this._shadowOffsetY,
+                flags,
+                vertexCount
+            ),
         };
     }
 
-    private transformRunVertices(layout: MsdfLayout, style: MsdfRichTextStyle, x: number, y: number, shrinkScale: number): Float32Array {
+    private transformRunVertices(
+        layout: MsdfLayout,
+        style: MsdfRichTextStyle,
+        x: number,
+        y: number,
+        shrinkScale: number
+    ): Float32Array {
         // 把 run 的局部布局映射到最终顶点：
         // 先应用 bold/italic/shrink，再叠加行内位置偏移。
-        const baseHeight = Math.max(layout.height, this.font.getLineHeight(style.fontSize));
+        const baseHeight = Math.max(
+            layout.height,
+            this.requireFont().getLineHeight(style.fontSize)
+        );
         const italicOffset = styleSkewExtra(baseHeight, style) * shrinkScale;
         const scaleX = styleScaleX(style);
-        const skewX = style.italic ? Math.tan(ITALIC_SKEW_DEGREES * Math.PI / 180) : 0;
+        const skewX = style.italic ? Math.tan((ITALIC_SKEW_DEGREES * Math.PI) / 180) : 0;
         const vertices = new Float32Array(layout.vertices.length);
 
         for (let i = 0; i < layout.vertices.length; i += 2) {
@@ -2904,7 +3268,11 @@ export class MsdfTextSprite extends Laya.Sprite {
         return vertices;
     }
 
-    private getRichTextCommandLayout(cmd: MsdfRichTextCommand, layoutCache?: MsdfRichTextLayoutCache): MsdfLayout {
+    private getRichTextCommandLayout(
+        cmd: MsdfRichTextCommand,
+        layoutCache?: MsdfRichTextLayoutCache
+    ): MsdfLayout {
+        const font = this.requireFont();
         const style = cmd.style;
         let styleLayouts = layoutCache?.get(style);
         if (!styleLayouts && layoutCache) {
@@ -2915,23 +3283,23 @@ export class MsdfTextSprite extends Laya.Sprite {
         let layout = styleLayouts?.get(cmd.text);
         if (!layout) {
             // 每个富文本 run 依然复用纯文本的 buildLayout，只是输入样式来自当前 run。
-            layout = this.font.buildLayout(
-                cmd.text,
-                style.fontSize,
-                this._letterSpacing,
-                0,
-                {
-                    underline: !!style.underline,
-                    strikethrough: !!style.strikethrough
-                }
-            );
+            layout = font.buildLayout(cmd.text, style.fontSize, this._letterSpacing, 0, {
+                underline: !!style.underline,
+                strikethrough: !!style.strikethrough,
+            });
             styleLayouts?.set(cmd.text, layout);
         }
 
         return layout;
     }
 
-    private buildRunBatch(cmd: MsdfRichTextCommand, x: number, y: number, layoutCache?: MsdfRichTextLayoutCache, shrinkScale: number = 1): MsdfDrawBatch | null {
+    private buildRunBatch(
+        cmd: MsdfRichTextCommand,
+        x: number,
+        y: number,
+        layoutCache?: MsdfRichTextLayoutCache,
+        shrinkScale: number = 1
+    ): MsdfDrawBatch | null {
         const style = cmd.style;
         const layout = this.getRichTextCommandLayout(cmd, layoutCache);
         if (layout.indices.length === 0) {
@@ -2953,7 +3321,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             glowColors: styleData.glowColors,
             shadowColors: styleData.shadowColors,
             packedParamsA: styleData.packedParamsA,
-            packedParamsB: styleData.packedParamsB
+            packedParamsB: styleData.packedParamsB,
         };
     }
 }

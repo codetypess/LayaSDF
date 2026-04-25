@@ -48,7 +48,7 @@ function parsePadding(value: string): Padding {
 @regClass()
 export class TestOverflow extends Laya.Script {
 
-    onStart(): void {
+    override onStart(): void {
         Laya.stage.bgColor = "#0b1220";
         MsdfLabel.registerFont("demo-msdf", MSDF_ATLAS_URL, MSDF_JSON_URL, MSDF_SHADER_URL);
 
