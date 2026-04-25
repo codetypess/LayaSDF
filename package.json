@@ -1,10 +1,14 @@
 {
   "scripts": {
-    "msdf:30": "node ./scripts/generate-msdf-font.mjs --font-size 30 --distance-range 6 --padding 1 --font assets/resources/source-han-sans-cn-medium.ttf --charset assets/resources/msdf/demo-charset.txt",
-    "msdf:25": "node ./scripts/generate-msdf-font.mjs --font-size 25 --distance-range 6 --padding 1 --font assets/resources/source-han-sans-cn-medium.ttf --charset assets/resources/msdf/demo-charset.txt"
+    "msdf:30": "tsx ./scripts/generate-msdf-font.ts --font-size 30 --distance-range 6 --padding 1 --font assets/resources/source-han-sans-cn-medium.ttf --charset assets/resources/msdf/demo-charset.txt",
+    "msdf:25": "tsx ./scripts/generate-msdf-font.ts --font-size 25 --distance-range 6 --padding 1 --font assets/resources/source-han-sans-cn-medium.ttf --charset assets/resources/msdf/demo-charset.txt",
+    "typecheck:scripts": "tsc -p ./scripts/tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@types/node": "^24.9.1",
     "msdf-bmfont-xml": "^2.8.0",
-    "prettier": "^3.8.3"
+    "prettier": "^3.8.3",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
   }
 }

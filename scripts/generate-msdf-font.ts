@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 
-import { mkdtempSync, mkdirSync, renameSync, rmSync } from "node:fs";
-import { basename, dirname, extname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { copyFileSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { injectDecorationGlyph } from "./msdf-decoration.mjs";
+import { injectDecorationGlyph } from "./msdf-decoration.js";
 
-function printHelp() {
+function printHelp(): void {
     console.log(`Usage:
-  node scripts/generate-msdf-font.mjs --font <ttf/otf> --charset <txt> [options]
+  tsx scripts/generate-msdf-font.ts --font <ttf/otf> --charset <txt> [options]
 
 Options:
   --font <path>            Input font file.
@@ -24,15 +24,16 @@ Options:
 `);
 }
 
-function getArg(name, fallback = undefined) {
+function getArg(name: string, fallback?: string): string | undefined {
     const index = process.argv.indexOf(name);
     if (index < 0 || index + 1 >= process.argv.length) {
         return fallback;
     }
+
     return process.argv[index + 1];
 }
 
-function hasArg(name) {
+function hasArg(name: string): boolean {
     return process.argv.includes(name);
 }
 
@@ -51,13 +52,15 @@ if (!fontPath || !charsetPath) {
 
 const resolvedFont = resolve(fontPath);
 const resolvedCharset = resolve(charsetPath);
-const textureOut = resolve(getArg("--texture-out", "assets/resources/msdf/msdf-demo.png"));
-const jsonOut = resolve(getArg("--json-out", "assets/resources/msdf/source-han-sans-cn-medium.json"));
-const fontSize = getArg("--font-size", "56");
-const textureSize = getArg("--texture-size", "2048,2048");
-const padding = getArg("--padding", "4");
-const distanceRange = getArg("--distance-range", "6");
-const fieldType = getArg("--field-type", "msdf");
+const textureOut = resolve(getArg("--texture-out") ?? "assets/resources/msdf/msdf-demo.png");
+const jsonOut = resolve(
+    getArg("--json-out") ?? "assets/resources/msdf/source-han-sans-cn-medium.json"
+);
+const fontSize = getArg("--font-size") ?? "56";
+const textureSize = getArg("--texture-size") ?? "2048,2048";
+const padding = getArg("--padding") ?? "4";
+const distanceRange = getArg("--distance-range") ?? "6";
+const fieldType = getArg("--field-type") ?? "msdf";
 
 mkdirSync(dirname(textureOut), { recursive: true });
 mkdirSync(dirname(jsonOut), { recursive: true });
@@ -71,33 +74,50 @@ const args = [
     "--yes",
     "msdf-bmfont-xml",
     "--pot",
-    "-f", "json",
-    "-i", resolvedCharset,
-    "-o", tempTextureBase,
-    "-m", textureSize,
-    "-s", fontSize,
-    "-p", padding,
-    "-r", distanceRange,
-    "-t", fieldType,
-    resolvedFont
+    "-f",
+    "json",
+    "-i",
+    resolvedCharset,
+    "-o",
+    tempTextureBase,
+    "-m",
+    textureSize,
+    "-s",
+    fontSize,
+    "-p",
+    padding,
+    "-r",
+    distanceRange,
+    "-t",
+    fieldType,
+    resolvedFont,
 ];
+
+const isWindows = process.platform === "win32";
+const npxCommand = isWindows ? (process.env.ComSpec ?? "cmd.exe") : "npx";
+const npxArgs = isWindows ? ["/d", "/s", "/c", "npx", ...args] : args;
 
 console.log(`Generating MSDF atlas from ${resolvedFont}`);
 
-const result = spawnSync("npx", args, {
+const result = spawnSync(npxCommand, npxArgs, {
     stdio: "inherit",
-    shell: false
+    shell: false,
 });
+
+if (result.error) {
+    console.error(`Failed to launch ${npxCommand}:`, result.error);
+    rmSync(tmpRoot, { recursive: true, force: true });
+    process.exit(1);
+}
 
 if (result.status !== 0) {
     rmSync(tmpRoot, { recursive: true, force: true });
     process.exit(result.status ?? 1);
 }
 
-renameSync(generatedTexture, textureOut);
-renameSync(generatedJson, jsonOut);
-
 try {
+    copyFileSync(generatedTexture, textureOut);
+    copyFileSync(generatedJson, jsonOut);
     injectDecorationGlyph({ texturePath: textureOut, jsonPath: jsonOut });
 } finally {
     rmSync(tmpRoot, { recursive: true, force: true });

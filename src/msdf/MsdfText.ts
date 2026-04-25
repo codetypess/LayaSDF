@@ -302,7 +302,7 @@ const LARGE_DECORATION_THICKNESS_BOOST = 1;
 const UNDERLINE_EXTRA_OFFSET_MIN = 0.75;
 const UNDERLINE_EXTRA_OFFSET_SCALE = 0.55;
 // 图集里会额外注入一个私有字形，运行时把它拉伸成下划线和删除线。
-// 这里的字符编码需要和 scripts/msdf-decoration.mjs 保持一致。
+// 这里的字符编码需要和 scripts/msdf-decoration.ts 保持一致。
 const DECORATION_SOURCE_CHAR_CODE = 0xe000;
 const DECORATION_SOURCE_CHAR = String.fromCodePoint(DECORATION_SOURCE_CHAR_CODE);
 const emojiTest = /[\uD800-\uDBFF][\uDC00-\uDFFF]/;
