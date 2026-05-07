@@ -1320,24 +1320,13 @@ export class MsdfLabel extends Laya.Label {
         };
     }
 
-    private getContentBox(layoutSize: MsdfLabelSize, effectInsets: Padding): MsdfLabelContentBox {
+    private getContentBox(layoutSize: MsdfLabelSize): MsdfLabelContentBox {
         return {
-            x: this._paddingValues[3] + effectInsets[3],
-            y: this._paddingValues[0] + effectInsets[0],
-            width: Math.max(
-                layoutSize.width -
-                    this._paddingValues[1] -
-                    this._paddingValues[3] -
-                    effectInsets[1] -
-                    effectInsets[3],
-                0
-            ),
+            x: this._paddingValues[3],
+            y: this._paddingValues[0],
+            width: Math.max(layoutSize.width - this._paddingValues[1] - this._paddingValues[3], 0),
             height: Math.max(
-                layoutSize.height -
-                    this._paddingValues[0] -
-                    this._paddingValues[2] -
-                    effectInsets[0] -
-                    effectInsets[2],
+                layoutSize.height - this._paddingValues[0] - this._paddingValues[2],
                 0
             ),
         };
@@ -1553,10 +1542,7 @@ export class MsdfLabel extends Laya.Label {
     }
 
     private resolveTextSpriteLayout(effectInsets: Padding): MsdfLabelTextSpriteLayout {
-        const explicitContentBox = this.getContentBox(
-            { width: this.width, height: this.height },
-            effectInsets
-        );
+        const explicitContentBox = this.getContentBox({ width: this.width, height: this.height });
         const availableWidth = this._hasExplicitWidth ? explicitContentBox.width : Number.MAX_VALUE;
         const availableHeight = this._hasExplicitHeight ? explicitContentBox.height : 0;
         const maxWidth =
@@ -1634,11 +1620,8 @@ export class MsdfLabel extends Laya.Label {
         this._msdfFitFlag = false;
     }
 
-    private getViewportContentBox(
-        layoutSize: MsdfLabelSize,
-        effectInsets: Padding
-    ): MsdfLabelContentBox {
-        const contentBox = this.getContentBox(layoutSize, effectInsets);
+    private getViewportContentBox(layoutSize: MsdfLabelSize): MsdfLabelContentBox {
+        const contentBox = this.getContentBox(layoutSize);
         if (this._hasExplicitHeight) {
             return contentBox;
         }
@@ -1694,8 +1677,8 @@ export class MsdfLabel extends Laya.Label {
         const effectInsets = this.getEffectInsets(this._maxOutlineWidth);
         const textSpriteLayout = this.resolveTextSpriteLayout(effectInsets);
 
-        // 真正参与排版的是扣掉 padding 和效果外扩后的内容区。
-        // glow/shadow/outline 虽然是视觉效果，但它们会占用标签的可用排版空间。
+        // 真正参与排版的是 padding 内部的内容区。
+        // 描边/发光/阴影会影响测量尺寸，但不再改变文本布局原点。
         this.applyTextSpriteLayout(runs, textSpriteLayout);
         this._textSprite.refresh();
         this.updateLayoutFrame();
@@ -1706,7 +1689,7 @@ export class MsdfLabel extends Laya.Label {
         const measuredSize = this.getMeasuredLabelSize(effectInsets);
         this.applyFitContentSize(measuredSize);
         const layoutSize = this.getLayoutSize(measuredSize);
-        const contentBox = this.getViewportContentBox(layoutSize, effectInsets);
+        const contentBox = this.getViewportContentBox(layoutSize);
         const viewportFrame = this.resolveViewportFrame(layoutSize, contentBox);
 
         this.applyViewportFrame(viewportFrame);
