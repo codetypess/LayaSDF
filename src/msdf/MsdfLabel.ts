@@ -60,6 +60,7 @@ const JSON_ASSET_PATTERN = /\.json(?:$|[?#])/i;
 const URL_SCHEME_PATTERN = /^(?:[a-z]+:)?\/\//i;
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-zA-Z]:[\\/]/;
 const DEFAULT_MSDF_SHADER_URL = "resources/shader/MsdfText.shader";
+const RES_URL_PREFIX = "res://";
 
 function parsePadding(value: string): Padding {
     const parts = value.split(",").map((item) => Number(item.trim()) || 0);
@@ -116,7 +117,7 @@ function normalizeAssetUrl(value: string): string {
 
 function isAbsoluteAssetUrl(value: string): boolean {
     return (
-        value.startsWith("res://") ||
+        value.startsWith(RES_URL_PREFIX) ||
         value.startsWith("/") ||
         WINDOWS_ABSOLUTE_PATH_PATTERN.test(value) ||
         URL_SCHEME_PATTERN.test(value)
@@ -755,8 +756,7 @@ export class MsdfLabel extends Laya.Label {
         inspector: "asset",
         isAsset: true,
         assetTypeFilter: "Json",
-        useAssetPath: true,
-        tips: "选择 MSDF 字体 json。脚本里仍然支持注册名和 texture|json|shader。",
+        tips: "选择 MSDF 字体 json。编辑器会序列化为 res://uuid，脚本里仍然支持注册名和 texture|json|shader。",
     })
     override get font(): string {
         return this._fontName;
@@ -1068,7 +1068,7 @@ export class MsdfLabel extends Laya.Label {
     }
 
     private isFontJsonReference(value: string): boolean {
-        return JSON_ASSET_PATTERN.test(value);
+        return value.startsWith(RES_URL_PREFIX) || JSON_ASSET_PATTERN.test(value);
     }
 
     private cancelPendingFontResolution(): void {
@@ -1087,9 +1087,11 @@ export class MsdfLabel extends Laya.Label {
         const resolvedJsonUrl = normalizeAssetUrl(jsonUrl);
         const resolvedShaderUrl = this.resolveMsdfShaderUrl(this._fontShaderUrl);
 
-        void Laya.loader
-            .load({ url: resolvedJsonUrl, type: Laya.Loader.JSON })
-            .then((rawData) => {
+        void Promise.all([
+            Laya.loader.load({ url: resolvedJsonUrl, type: Laya.Loader.JSON }),
+            Laya.AssetDb.inst.resolveURL(resolvedJsonUrl),
+        ])
+            .then(([rawData, resolvedAssetUrl]) => {
                 if (this.destroyed || requestToken !== this._fontResolveToken) {
                     return;
                 }
@@ -1097,7 +1099,8 @@ export class MsdfLabel extends Laya.Label {
                 const resources = this.resolveFontResourcesFromJsonAsset(
                     resolvedJsonUrl,
                     rawData,
-                    resolvedShaderUrl
+                    resolvedShaderUrl,
+                    normalizeAssetUrl(resolvedAssetUrl || resolvedJsonUrl)
                 );
                 if (!resources) {
                     console.warn(
@@ -1126,7 +1129,8 @@ export class MsdfLabel extends Laya.Label {
     private resolveFontResourcesFromJsonAsset(
         jsonUrl: string,
         rawData: unknown,
-        shaderUrl: string
+        shaderUrl: string,
+        resourceBaseUrl: string = jsonUrl
     ): MsdfFontResourceConfig | null {
         const fontData = normalizeFontJsonAssetData(rawData);
         const pages = Array.isArray(fontData?.pages) ? fontData.pages : null;
@@ -1136,7 +1140,7 @@ export class MsdfLabel extends Laya.Label {
         }
 
         return {
-            textureUrl: resolveAssetUrl(jsonUrl, page),
+            textureUrl: resolveAssetUrl(resourceBaseUrl, page),
             jsonUrl,
             shaderUrl,
         };
