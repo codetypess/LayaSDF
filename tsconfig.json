@@ -9,20 +9,10 @@
     "experimentalDecorators": true,
     "skipLibCheck": true,
     "moduleResolution": "node",
-    "lib": [
-      "es2017",
-      "dom"
-    ],
+    "lib": ["es2017", "dom"],
     "allowSyntheticDefaultImports": true,
     "types": []
   },
-  "include": [
-    "./assets",
-    "./src",
-    "./engine"
-  ],
-  "exclude": [
-    "assets/plugins"
-  ],
-  "typescript.experimental.useTsgo": true
+  "include": ["./assets", "./src", "./engine"],
+  "exclude": ["assets/plugins"]
 }

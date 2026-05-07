@@ -109,26 +109,6 @@ type MsdfPlainTextBatchCache = {
     packedParamsB: Uint32Array | null;
 };
 
-type MsdfTextOptions = {
-    text?: string;
-    fontSize?: number;
-    letterSpacing?: number;
-    faceDilate?: number;
-    textColor?: Laya.Vector4;
-    underlineColor?: Laya.Vector4 | null;
-    strikethroughColor?: Laya.Vector4 | null;
-    outlineColor?: Laya.Vector4;
-    outlineWidth?: number;
-    glowColor?: Laya.Vector4;
-    glowSize?: number;
-    shadowColor?: Laya.Vector4;
-    shadowOffsetX?: number;
-    shadowOffsetY?: number;
-    shadowBlur?: number;
-    underline?: boolean;
-    strikethrough?: boolean;
-};
-
 type MsdfDecorationOptions = {
     underline?: boolean;
     strikethrough?: boolean;
@@ -306,7 +286,7 @@ const UNDERLINE_EXTRA_OFFSET_SCALE = 0.55;
 const DECORATION_SOURCE_CHAR_CODE = 0xe000;
 const DECORATION_SOURCE_CHAR = String.fromCodePoint(DECORATION_SOURCE_CHAR_CODE);
 const emojiTest = /[\uD800-\uDBFF][\uDC00-\uDFFF]/;
-const wordBoundaryTest = /[a-zA-Z0-9\!-\+\/_]+$/;
+const wordBoundaryTest = /[a-zA-Z0-9!+/_-]+$/;
 const punctuationChars = new Set(
     Array.from(".,，。、!！；;”’)）]】}》").map((char) => char.charCodeAt(0))
 );
@@ -2208,7 +2188,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             if (cmd.width > 0) {
                 match = wordBoundaryTest.exec(cmd.text);
                 const textLen = cmd.text.length;
-                if (match == null) {
+                if (match === null) {
                     this.advanceRichTextLine(state);
                     if (isPunctuation && totalLen === 0) {
                         if (this.splitRichTextCommandAt(cmd, textLen - 1, state.metricCache)) {
@@ -2285,7 +2265,7 @@ export class MsdfTextSprite extends Laya.Sprite {
         }
 
         const wordBoundary = part.length > 0 ? (wordBoundaryTest.exec(part)?.index ?? null) : 0;
-        if (wordBoundary != null && wordBoundary > 0) {
+        if (wordBoundary !== null && wordBoundary > 0) {
             if (wordBoundary > part.length - maxWordLength) {
                 result.index = startIndex + wordBoundary;
                 result.part = text.substring(startIndex, result.index);
@@ -2299,7 +2279,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             return result;
         }
 
-        if (wordBoundary != null && state.lastCmd != null) {
+        if (wordBoundary !== null && state.lastCmd !== null) {
             const movedToNewLine = this.tryMoveTrailingWordToNextLine(
                 state,
                 part.length,
@@ -2308,7 +2288,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             if (movedToNewLine) {
                 result.remainWidth = state.rectWidth - state.lineX;
                 if (
-                    result.charWidth != null &&
+                    result.charWidth !== null &&
                     result.wordWidth + result.charWidth < result.remainWidth
                 ) {
                     result.wordWidth += result.charWidth;
@@ -2356,7 +2336,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             wordWidth: italicExtra + extraWidth,
         };
 
-        if (charWidth != null) {
+        if (charWidth !== null) {
             nextState.wordWidth += charWidth;
             if (charInfo.text.length > 1) {
                 nextState.index++;
@@ -2365,7 +2345,7 @@ export class MsdfTextSprite extends Laya.Sprite {
             nextState.index++;
         }
 
-        if (charWidth == null && nextState.index < text.length - 1) {
+        if (charWidth === null && nextState.index < text.length - 1) {
             nextState.wordWidth = this.getRichTextMetrics(
                 text.substring(nextState.startIndex, nextState.index + 1),
                 style,
@@ -3084,7 +3064,7 @@ export class MsdfTextSprite extends Laya.Sprite {
     }
 
     private isRichTextCommandClickable(cmd: MsdfRichTextCommand): boolean {
-        return cmd.link != null || !!cmd.clickable;
+        return cmd.link !== null || !!cmd.clickable;
     }
 
     private recordRichTextClickArea(

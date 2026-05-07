@@ -61,8 +61,6 @@ const URL_SCHEME_PATTERN = /^(?:[a-z]+:)?\/\//i;
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-zA-Z]:[\\/]/;
 const DEFAULT_MSDF_SHADER_URL = "resources/shader/MsdfText.shader";
 
-const { regClass } = Laya;
-
 function parsePadding(value: string): Padding {
     const parts = value.split(",").map((item) => Number(item.trim()) || 0);
 
