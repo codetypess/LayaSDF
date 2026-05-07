@@ -59,7 +59,7 @@ const ESCAPE_SEQUENCE: Record<string, string> = { "\\n": "\n", "\\t": "\t" };
 const JSON_ASSET_PATTERN = /\.json(?:$|[?#])/i;
 const URL_SCHEME_PATTERN = /^(?:[a-z]+:)?\/\//i;
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-zA-Z]:[\\/]/;
-const DEFAULT_MSDF_SHADER_URL = "shaders/MsdfText.shader";
+const DEFAULT_MSDF_SHADER_URL = "resources/shader/MsdfText.shader";
 
 const { regClass } = Laya;
 

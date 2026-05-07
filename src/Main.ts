@@ -2,9 +2,9 @@ import { MsdfLabel } from "./msdf/MsdfLabel";
 
 const { regClass } = Laya;
 
-const MSDF_SHADER_URL = "shaders/MsdfText.shader";
-const MSDF_ATLAS_URL = "resources/msdf/msdf-demo.png";
-const MSDF_JSON_URL = "resources/msdf/source-han-sans-cn-medium.json";
+const MSDF_SHADER_URL = "resources/shader/MsdfText.shader";
+const MSDF_ATLAS_URL = "resources/font/SourceHanSans.png";
+const MSDF_JSON_URL = "resources/font/SourceHanSans.json";
 const NATIVE_FONT_URL = "resources/source-han-sans-cn-medium.ttf";
 const CARD_WIDTH = 492;
 const CARD_HEIGHT = 340;

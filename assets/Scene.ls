@@ -45,7 +45,7 @@
       "width": 430,
       "height": 148,
       "text": "我们不一样我们不一样我们不一样",
-      "font": "resources/msdf/source-han-sans-cn-medium.json",
+      "font": "resources/font/SourceHanSans.json",
       "fontSize": 50,
       "color": "rgba(220, 220, 220, 1)",
       "templateVars": true,
