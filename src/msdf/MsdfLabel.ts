@@ -205,8 +205,6 @@ export class MsdfLabel extends Laya.Label {
     private _shadowBlur = 0;
     private _shadowOffsetX = 0;
     private _shadowOffsetY = 0;
-    private _bgColor = "";
-    private _borderColor = "";
     private _wordWrap = false;
     private _bold = false;
     private _italic = false;
@@ -615,26 +613,26 @@ export class MsdfLabel extends Laya.Label {
     }
 
     override get bgColor(): string {
-        return this._bgColor;
+        return super.bgColor;
     }
 
     override set bgColor(value: string) {
-        if (this._bgColor === value) {
+        if (this.bgColor === value) {
             return;
         }
-        this._bgColor = value || "";
+        super.bgColor = value;
         this.scheduleRefresh("layout");
     }
 
     override get borderColor(): string {
-        return this._borderColor;
+        return super.borderColor;
     }
 
     override set borderColor(value: string) {
-        if (this._borderColor === value) {
+        if (this.borderColor === value) {
             return;
         }
-        this._borderColor = value || "";
+        super.borderColor = value;
         this.scheduleRefresh("layout");
     }
 
@@ -860,7 +858,7 @@ export class MsdfLabel extends Laya.Label {
     }
 
     override get templateVars(): MsdfTemplateVars {
-        return this._templateVars ?? {};
+        return this._templateVars!;
     }
 
     override set templateVars(value: MsdfTemplateVars | boolean) {
@@ -1721,7 +1719,7 @@ export class MsdfLabel extends Laya.Label {
             return;
         }
 
-        if (!this._bgColor && !this._borderColor) {
+        if (!this.bgColor && !this.borderColor) {
             return;
         }
 
@@ -1730,9 +1728,9 @@ export class MsdfLabel extends Laya.Label {
             0,
             width,
             height,
-            this._bgColor || null,
-            this._borderColor || null,
-            this._borderColor ? 1 : 0
+            this.bgColor || null,
+            this.borderColor || null,
+            this.borderColor ? 1 : 0
         );
     }
 }
