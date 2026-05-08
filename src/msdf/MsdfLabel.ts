@@ -4,7 +4,7 @@ import {
     MsdfRichTextRun,
     MsdfRichTextStyle,
     MsdfTextLineMetric,
-    MsdfTextSprite,
+    MsdfText,
 } from "./MsdfText";
 
 type Padding = [number, number, number, number];
@@ -172,6 +172,14 @@ function sameRichStyle(left: MsdfRichTextStyle, right: MsdfRichTextStyle): boole
     );
 }
 
+function isNil(value: unknown): value is null | undefined {
+    return value === null || value === undefined;
+}
+
+function hasValue<T>(value: T | null | undefined): value is T {
+    return !isNil(value);
+}
+
 @Laya.regClass()
 @Laya.classInfo({
     menu: "自定义",
@@ -180,7 +188,7 @@ export class MsdfLabel extends Laya.Label {
     private static readonly fontCache = new Map<string, Promise<MsdfBitmapFont>>();
     private static readonly registeredFonts = new Map<string, MsdfFontResourceConfig>();
 
-    private _textSprite!: MsdfTextSprite;
+    private _textSprite!: MsdfText;
     private _font: MsdfBitmapFont | null = null;
     private _resourceKey = "";
     private _hasExplicitWidth = false;
@@ -233,14 +241,14 @@ export class MsdfLabel extends Laya.Label {
     constructor(text?: string) {
         super();
 
-        if (text !== undefined) {
+        if (!isNil(text)) {
             this.text = text;
         }
     }
 
     protected override createChildren(): void {
         if (!this._textSprite) {
-            this._textSprite = new MsdfTextSprite();
+            this._textSprite = new MsdfText();
             this.configureInternalTextSprite(this._textSprite);
             this.addChild(this._textSprite);
         }
@@ -253,11 +261,11 @@ export class MsdfLabel extends Laya.Label {
         this.pruneLegacySerializedChildren();
     }
 
-    private configureInternalTextSprite(textSprite: MsdfTextSprite): void {
+    private configureInternalTextSprite(textSprite: MsdfText): void {
         textSprite.mouseThrough = true;
         textSprite.visible = false;
         textSprite.hideFlags = Laya.HideFlags.HideAndDontSave;
-        this._tf = textSprite as unknown as Laya.Text;
+        this._tf = textSprite;
         this._tf.hideFlags = Laya.HideFlags.HideAndDontSave;
     }
 
@@ -345,12 +353,7 @@ export class MsdfLabel extends Laya.Label {
     }
 
     override set text(value: string) {
-        let nextValue =
-            value === null || value === undefined
-                ? ""
-                : typeof value === "string"
-                  ? value
-                  : `${value}`;
+        let nextValue = isNil(value) ? "" : typeof value === "string" ? value : `${value}`;
         const langPacks = (Laya.Text as typeof Laya.Text & { langPacks?: Record<string, string> })
             ?.langPacks;
         if (!this._ignoreLang && langPacks) {
@@ -837,7 +840,7 @@ export class MsdfLabel extends Laya.Label {
         return this._tf;
     }
 
-    get msdfTextField(): MsdfTextSprite {
+    get msdfTextField(): MsdfText {
         return this._textSprite;
     }
 
@@ -868,7 +871,7 @@ export class MsdfLabel extends Laya.Label {
 
         if (nextValue === true) {
             this._templateVars = {};
-        } else if (nextValue === false || nextValue === null || nextValue === undefined) {
+        } else if (nextValue === false || isNil(nextValue)) {
             this._templateVars = null;
         } else {
             this._templateVars = nextValue;
@@ -1194,13 +1197,12 @@ export class MsdfLabel extends Laya.Label {
             pos3 = tag.indexOf("=");
             if (pos3 !== -1) {
                 const value = this._templateVars[tag.substring(0, pos3)];
-                result =
-                    value === null || value === undefined
-                        ? result + tag.substring(pos3 + 1)
-                        : this.appendTemplateValue(result, value);
+                result = isNil(value)
+                    ? result + tag.substring(pos3 + 1)
+                    : this.appendTemplateValue(result, value);
             } else {
                 const value = this._templateVars[tag];
-                if (value !== null && value !== undefined) {
+                if (hasValue(value)) {
                     result = this.appendTemplateValue(result, value);
                 }
             }
@@ -1403,7 +1405,7 @@ export class MsdfLabel extends Laya.Label {
         if (
             previous &&
             sameRichStyle(previous.style, style) &&
-            (previous.link ?? null) === link &&
+            (previous.link ?? null) === (link ?? null) &&
             !!previous.clickable === clickable
         ) {
             previous.text += text;
@@ -1483,7 +1485,7 @@ export class MsdfLabel extends Laya.Label {
                 element.text,
                 richStyle,
                 currentLink,
-                currentLink !== null || !!richStyle.underline
+                hasValue(currentLink) || !!richStyle.underline
             );
         }
 
