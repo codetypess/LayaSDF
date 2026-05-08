@@ -186,6 +186,7 @@ function hasValue<T>(value: T | null | undefined): value is T {
 })
 export class MsdfLabel extends Laya.Label {
     private static readonly fontCache = new Map<string, Promise<MsdfBitmapFont>>();
+    private static readonly loadedFontCache = new Map<string, MsdfBitmapFont>();
     private static readonly registeredFonts = new Map<string, MsdfFontResourceConfig>();
 
     private _textSprite!: MsdfText;
@@ -298,12 +299,19 @@ export class MsdfLabel extends Laya.Label {
         shaderUrl: string
     ): Promise<MsdfBitmapFont> {
         const key = MsdfLabel.getFontResourceKey(textureUrl, jsonUrl, shaderUrl);
+        const loadedFont = MsdfLabel.loadedFontCache.get(key);
+        if (loadedFont) {
+            return Promise.resolve(loadedFont);
+        }
+
         let task = MsdfLabel.fontCache.get(key);
 
         if (!task) {
             task = (async () => {
                 await Laya.loader.load(shaderUrl);
-                return MsdfBitmapFont.load(textureUrl, jsonUrl);
+                const font = await MsdfBitmapFont.load(textureUrl, jsonUrl);
+                MsdfLabel.loadedFontCache.set(key, font);
+                return font;
             })();
             MsdfLabel.fontCache.set(key, task);
         }
@@ -909,19 +917,23 @@ export class MsdfLabel extends Laya.Label {
     }
 
     get maxScrollX(): number {
+        this.ensureMeasurementUpToDate();
         return this._textSprite.maxScrollX;
     }
 
     get maxScrollY(): number {
+        this.ensureMeasurementUpToDate();
         return this._textSprite.maxScrollY;
     }
 
     get textWidth(): number {
+        this.ensureMeasurementUpToDate();
         const effectInsets = this.getEffectInsets();
         return this._textSprite.contentWidth + effectInsets[1] + effectInsets[3];
     }
 
     get textHeight(): number {
+        this.ensureMeasurementUpToDate();
         const effectInsets = this.getEffectInsets();
         return this._textSprite.contentHeight + effectInsets[0] + effectInsets[2];
     }
@@ -1251,6 +1263,11 @@ export class MsdfLabel extends Laya.Label {
         this._font = null;
     }
 
+    private ensureMeasurementUpToDate(): void {
+        this.runCallLater(this.changeText);
+        this.runCallLater(this.updateLayoutFrame);
+    }
+
     private applyLoadedFont(font: MsdfBitmapFont): void {
         this._font = font;
         this._textSprite.resetFont(font);
@@ -1284,6 +1301,12 @@ export class MsdfLabel extends Laya.Label {
         );
         this._resourceKey = nextKey;
         this._font = null;
+
+        const loadedFont = MsdfLabel.loadedFontCache.get(nextKey);
+        if (loadedFont) {
+            this.applyLoadedFont(loadedFont);
+            return;
+        }
 
         MsdfLabel.preload(this._fontTextureUrl, this._fontJsonUrl, this._fontShaderUrl)
             .then((font) => {

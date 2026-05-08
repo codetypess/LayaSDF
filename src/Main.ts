@@ -58,6 +58,17 @@ export class Main extends Laya.Script {
         panel.addChild(content);
 
         panel.refresh();
+
+        Laya.timer.once(2000, this, () => {
+            const label = new MsdfLabel();
+            label.width = 100;
+            label.wordWrap = true;
+            label.font = "demo-msdf";
+            label.fontSize = 28;
+            label.text = "测试动态修改宽度后换行是否正确 触发时机：2秒后";
+            console.log("test dynamic width change", label.textWidth, label.textHeight);
+            console.log("test dynamic width change", label.text);
+        });
     }
 
     private createRegressionGroups(): MainCompareGroup[] {
