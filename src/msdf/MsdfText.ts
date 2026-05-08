@@ -40,6 +40,8 @@ type MsdfLayout = {
     uvs: Float32Array;
     indices: Uint16Array;
     quadKinds: Uint8Array;
+    lineInfos: Array<{ x: number; width: number }>;
+    quadLineIndices: Uint16Array;
     width: number;
     height: number;
 };
@@ -305,6 +307,8 @@ function createEmptyLayout(): MsdfLayout {
         uvs: new Float32Array(0),
         indices: new Uint16Array(0),
         quadKinds: new Uint8Array(0),
+        lineInfos: [],
+        quadLineIndices: new Uint16Array(0),
         width: 0,
         height: 0,
     };
@@ -964,6 +968,7 @@ export class MsdfBitmapFont {
         const uvs: number[] = [];
         const indices: number[] = [];
         const quadKinds: number[] = [];
+        const quadLineIndices: number[] = [];
         const lineHeight = this.lineHeight * scale;
         const lineInfos: Array<{ y: number; advanceWidth: number; left: number; right: number }> = [
             {
@@ -993,7 +998,8 @@ export class MsdfBitmapFont {
             top: number,
             right: number,
             bottom: number,
-            quadKind: number = QUAD_KIND_TEXT
+            quadKind: number = QUAD_KIND_TEXT,
+            targetLineIndex: number = lineIndex
         ): void => {
             // 每个字形或装饰线最终都对应一个带 UV 的四边形。
             const u0 = glyph.x / this.atlasWidth;
@@ -1015,6 +1021,7 @@ export class MsdfBitmapFont {
                 vertexOffset + 3
             );
             quadKinds.push(quadKind);
+            quadLineIndices.push(targetLineIndex);
 
             minX = Math.min(minX, left);
             minY = Math.min(minY, top);
@@ -1081,7 +1088,7 @@ export class MsdfBitmapFont {
             if (!decorationGlyph || !decorationMetrics) {
                 this.reportMissingDecorationGlyph();
             } else {
-                for (const line of lineInfos) {
+                for (const [decorationLineIndex, line] of lineInfos.entries()) {
                     const lineLeft = Number.isFinite(line.left)
                         ? Math.min(0, line.left, decorationMetrics.leftOverhang)
                         : decorationMetrics.leftOverhang;
@@ -1094,6 +1101,9 @@ export class MsdfBitmapFont {
                         continue;
                     }
 
+                    line.left = lineLeft;
+                    line.right = lineRight;
+
                     if (decorations.underline) {
                         const top = line.y + decorationMetrics.underlineTop;
                         pushQuad(
@@ -1102,7 +1112,8 @@ export class MsdfBitmapFont {
                             top,
                             lineRight,
                             top + decorationMetrics.thickness,
-                            QUAD_KIND_UNDERLINE
+                            QUAD_KIND_UNDERLINE,
+                            decorationLineIndex
                         );
                     }
 
@@ -1114,12 +1125,27 @@ export class MsdfBitmapFont {
                             top,
                             lineRight,
                             top + decorationMetrics.thickness,
-                            QUAD_KIND_STRIKETHROUGH
+                            QUAD_KIND_STRIKETHROUGH,
+                            decorationLineIndex
                         );
                     }
                 }
             }
         }
+
+        const normalizedLineInfos = lineInfos.map((line) => {
+            if (!Number.isFinite(line.left) || !Number.isFinite(line.right)) {
+                return {
+                    x: 0,
+                    width: line.advanceWidth,
+                };
+            }
+
+            return {
+                x: line.left - minX,
+                width: line.right - line.left,
+            };
+        });
 
         if (quadCount === 0) {
             return {
@@ -1127,6 +1153,8 @@ export class MsdfBitmapFont {
                 uvs: new Float32Array(0),
                 indices: new Uint16Array(0),
                 quadKinds: new Uint8Array(0),
+                lineInfos: normalizedLineInfos,
+                quadLineIndices: new Uint16Array(0),
                 width: widestLine,
                 height: lineCount * lineHeight + Math.max(0, lineCount - 1) * lineSpacing,
             };
@@ -1147,6 +1175,8 @@ export class MsdfBitmapFont {
             uvs: new Float32Array(uvs),
             indices: new Uint16Array(indices),
             quadKinds: new Uint8Array(quadKinds),
+            lineInfos: normalizedLineInfos,
+            quadLineIndices: new Uint16Array(quadLineIndices),
             width: Math.max(widestLine, maxX - minX),
             height: Math.max(
                 lineCount * lineHeight + Math.max(0, lineCount - 1) * lineSpacing,
@@ -2061,7 +2091,10 @@ export class MsdfText extends Laya.Text {
         this.bubbleEvent(Laya.Event.LINK, area.link ?? area.text);
     }
 
-    private buildPlainTextLineMetrics(shrinkScale: number): MsdfTextLineMetric[] {
+    private buildPlainTextLineMetrics(
+        shrinkScale: number,
+        contentBoxWidth: number
+    ): MsdfTextLineMetric[] {
         if (this._text.length === 0) {
             return [];
         }
@@ -2069,23 +2102,22 @@ export class MsdfText extends Laya.Text {
         const font = this.requireFont();
         const layoutText = this.resolvePlainTextLayoutText(font);
 
-        return this.scaleLineMetrics(
-            layoutText
-                .split("\n")
-                .map((lineText, index) =>
-                    createTextLineMetric(
-                        0,
-                        index * (font.getLineHeight(this._fontSize) + this._lineSpacing),
-                        font.measureTextWidth(lineText, this._fontSize, this._letterSpacing),
-                        font.getLineHeight(this._fontSize),
-                        this._defaultAlign,
-                        lineText,
-                        this._fontSize,
-                        this._textStyle
-                    )
-                ),
-            shrinkScale
-        );
+        return layoutText.split("\n").map((lineText, index) => {
+            const line = this._layout.lineInfos[index];
+            const lineWidth = font.measureTextWidth(lineText, this._fontSize, this._letterSpacing);
+            const lineInfo = line ?? { x: 0, width: lineWidth };
+
+            return createTextLineMetric(
+                this.resolvePlainTextLineOffsetX(lineInfo, contentBoxWidth, shrinkScale),
+                index * (font.getLineHeight(this._fontSize) + this._lineSpacing) * shrinkScale,
+                lineWidth * shrinkScale,
+                font.getLineHeight(this._fontSize) * shrinkScale,
+                this._defaultAlign,
+                lineText,
+                this._fontSize,
+                this._textStyle
+            );
+        });
     }
 
     private getScrollOffsetX(): number {
@@ -2129,6 +2161,11 @@ export class MsdfText extends Laya.Text {
 
         const vertexCount = this._layout.vertices.length >> 1;
         const vertices = scaleVertices(this._layout.vertices, shrinkScale);
+        this.applyPlainTextLineOffsets(
+            vertices,
+            this.resolvePlainTextContentBoxWidth(shrinkScale),
+            shrinkScale
+        );
         this.applyScrollOffsetToVertices(vertices);
 
         const flags = this.getEffectFlagsForStyle(this._outlineWidth, this._outlineColor);
@@ -2153,11 +2190,12 @@ export class MsdfText extends Laya.Text {
         this.clearRichTextClickAreas();
         this._layout = this.getPlainTextLayout();
         const shrinkScale = this.resolveShrinkScale(this._layout.width, this._layout.height);
+        const contentBoxWidth = this.resolvePlainTextContentBoxWidth(shrinkScale);
 
         return {
             contentWidth: this._layout.width * shrinkScale,
             contentHeight: this._layout.height * shrinkScale,
-            lines: this.buildPlainTextLineMetrics(shrinkScale),
+            lines: this.buildPlainTextLineMetrics(shrinkScale, contentBoxWidth),
             drawBatches: this.buildPlainTextDrawBatches(shrinkScale),
             layout: this._layout,
         };
@@ -3131,7 +3169,8 @@ export class MsdfText extends Laya.Text {
     }
 
     refresh(): void {
-        this._typeset();
+        this.markChanged();
+        this.typeset();
     }
 
     protected override _typeset(): void {
@@ -3352,16 +3391,70 @@ export class MsdfText extends Laya.Text {
         contentBoxWidth: number,
         shrinkScale: number
     ): number {
-        const lineAlign = line.align || this._defaultAlign;
+        return this.resolveAlignedLineStartX(contentBoxWidth, line.width * shrinkScale, line.align);
+    }
+
+    private resolveAlignedLineStartX(
+        contentBoxWidth: number,
+        lineWidth: number,
+        align: string | null | undefined
+    ): number {
+        const lineAlign = align || this._defaultAlign;
         if (lineAlign === "center") {
-            return Math.max((contentBoxWidth - line.width * shrinkScale) * 0.5, 0);
+            return Math.max((contentBoxWidth - lineWidth) * 0.5, 0);
         }
 
         if (lineAlign === "right") {
-            return Math.max(contentBoxWidth - line.width * shrinkScale, 0);
+            return Math.max(contentBoxWidth - lineWidth, 0);
         }
 
         return 0;
+    }
+
+    private resolvePlainTextContentBoxWidth(shrinkScale: number): number {
+        return this._layoutWidth >= 0 ? this._layoutWidth : this._layout.width * shrinkScale;
+    }
+
+    private resolvePlainTextLineOffsetX(
+        line: { x: number; width: number },
+        contentBoxWidth: number,
+        shrinkScale: number
+    ): number {
+        return (
+            this.resolveAlignedLineStartX(
+                contentBoxWidth,
+                line.width * shrinkScale,
+                this._defaultAlign
+            ) -
+            line.x * shrinkScale
+        );
+    }
+
+    private applyPlainTextLineOffsets(
+        vertices: Float32Array,
+        contentBoxWidth: number,
+        shrinkScale: number
+    ): void {
+        if (this._layout.lineInfos.length === 0 || this._layout.quadLineIndices.length === 0) {
+            return;
+        }
+
+        const lineOffsets = this._layout.lineInfos.map((line) =>
+            this.resolvePlainTextLineOffsetX(line, contentBoxWidth, shrinkScale)
+        );
+
+        for (let quadIndex = 0; quadIndex < this._layout.quadLineIndices.length; quadIndex += 1) {
+            const lineOffsetX = lineOffsets[this._layout.quadLineIndices[quadIndex]] ?? 0;
+            if (lineOffsetX === 0) {
+                continue;
+            }
+
+            const vertexOffset = quadIndex * 8;
+            vertices[vertexOffset] += lineOffsetX;
+            vertices[vertexOffset + 2] += lineOffsetX;
+            vertices[vertexOffset + 4] += lineOffsetX;
+            vertices[vertexOffset + 6] += lineOffsetX;
+        }
     }
 
     private appendMergedBatch(
