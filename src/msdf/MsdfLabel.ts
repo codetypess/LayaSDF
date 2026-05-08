@@ -53,6 +53,9 @@ type MsdfLabelViewportFrame = {
     clipRectWidth: number;
     clipRectHeight: number;
 };
+type LayaLabelFitFlagHost = {
+    _fitFlag?: boolean;
+};
 const NORMALIZE_CR = /\r\n?/g;
 const ESCAPE_CHARS_PATTERN = /\\(\w)/g;
 const ESCAPE_SEQUENCE: Record<string, string> = { "\\n": "\n", "\\t": "\t" };
@@ -840,6 +843,13 @@ export class MsdfLabel extends Laya.Label {
             return;
         }
 
+        if (this.isFitContentValue(next) && !Laya.SerializeUtil.isDeserializing) {
+            this.ensureMeasurementUpToDate();
+            if (this.canApplyFitContentInCurrentMode()) {
+                this.writeFitContentSize(this.getNativeFitContentSize(), next);
+            }
+        }
+
         this._fitContent = next;
         this.scheduleRefresh();
     }
@@ -1030,7 +1040,11 @@ export class MsdfLabel extends Laya.Label {
     }
 
     override set_width(value: number): void {
-        if (this._fitContent === "yes" && !this._msdfFitFlag) {
+        if (
+            this._fitContent === "yes" &&
+            !this._msdfFitFlag &&
+            this.canBlockExternalWidthInCurrentMode()
+        ) {
             return;
         }
 
@@ -1039,7 +1053,11 @@ export class MsdfLabel extends Laya.Label {
     }
 
     override set_height(value: number): void {
-        if ((this._fitContent === "yes" || this._fitContent === "height") && !this._msdfFitFlag) {
+        if (
+            this.isFitContentValue(this._fitContent) &&
+            !this._msdfFitFlag &&
+            this.canBlockExternalHeightInCurrentMode()
+        ) {
             return;
         }
 
@@ -1338,6 +1356,22 @@ export class MsdfLabel extends Laya.Label {
         };
     }
 
+    private getNativeFitContentSize(): MsdfLabelSize {
+        const contentWidth = this._textSprite.contentWidth;
+        const contentHeight = this._textSprite.contentHeight;
+
+        return {
+            width:
+                contentWidth > 0
+                    ? contentWidth + this._paddingValues[1] + this._paddingValues[3]
+                    : 0,
+            height:
+                contentHeight > 0
+                    ? contentHeight + this._paddingValues[0] + this._paddingValues[2]
+                    : 0,
+        };
+    }
+
     private getLayoutSize(measuredSize: MsdfLabelSize): MsdfLabelSize {
         return {
             width: this._hasExplicitWidth ? this.width : measuredSize.width,
@@ -1630,19 +1664,72 @@ export class MsdfLabel extends Laya.Label {
         return 0;
     }
 
-    private applyFitContentSize(measuredSize: MsdfLabelSize): void {
-        if (this._msdfFitFlag || (this._fitContent !== "yes" && this._fitContent !== "height")) {
+    private isFitContentValue(value: MsdfLabelFitContent): boolean {
+        return value === "yes" || value === "height";
+    }
+
+    private isEditingNode(): boolean {
+        return this._getBit(Laya.NodeFlags.EDITING_NODE);
+    }
+
+    private canApplyFitContentInCurrentMode(): boolean {
+        return (
+            !this.isEditingNode() ||
+            (this._textSprite.contentWidth > 0 && this._textSprite.contentHeight > 0)
+        );
+    }
+
+    private canBlockExternalWidthInCurrentMode(): boolean {
+        return !this.isEditingNode() || this._textSprite.contentWidth > 0;
+    }
+
+    private canBlockExternalHeightInCurrentMode(): boolean {
+        return !this.isEditingNode() || this._textSprite.contentHeight > 0;
+    }
+
+    private withFitContentWrite<T>(callback: () => T): T {
+        const nativeLabel = this as unknown as LayaLabelFitFlagHost;
+        const previousMsdfFitFlag = this._msdfFitFlag;
+        const hadNativeFitFlag = Object.prototype.hasOwnProperty.call(nativeLabel, "_fitFlag");
+        const previousNativeFitFlag = nativeLabel._fitFlag;
+
+        // Laya.Label.set_width/set_height 也会检查自己的 _fitFlag。
+        this._msdfFitFlag = true;
+        nativeLabel._fitFlag = true;
+        try {
+            return callback();
+        } finally {
+            this._msdfFitFlag = previousMsdfFitFlag;
+            if (hadNativeFitFlag) {
+                nativeLabel._fitFlag = previousNativeFitFlag;
+            } else {
+                delete nativeLabel._fitFlag;
+            }
+        }
+    }
+
+    private writeFitContentSize(size: MsdfLabelSize, fitContent: MsdfLabelFitContent): void {
+        this.withFitContentWrite(() => {
+            if (fitContent === "height") {
+                this.set_height(size.height);
+                return;
+            }
+
+            this.set_width(size.width);
+            this.set_height(size.height);
+        });
+    }
+
+    private applyFitContentSize(): void {
+        if (
+            this._msdfFitFlag ||
+            !this.isFitContentValue(this._fitContent) ||
+            !this.canApplyFitContentInCurrentMode()
+        ) {
             return;
         }
 
-        this._msdfFitFlag = true;
-        if (this._fitContent === "height") {
-            this.set_height(measuredSize.height);
-        } else {
-            this.set_width(measuredSize.width);
-            this.set_height(measuredSize.height);
-        }
-        this._msdfFitFlag = false;
+        this.writeFitContentSize(this.getNativeFitContentSize(), this._fitContent);
     }
 
     private getViewportContentBox(layoutSize: MsdfLabelSize): MsdfLabelContentBox {
@@ -1712,7 +1799,7 @@ export class MsdfLabel extends Laya.Label {
     private updateLayoutFrame(): void {
         const effectInsets = this.getEffectInsets();
         const measuredSize = this.getMeasuredLabelSize(effectInsets);
-        this.applyFitContentSize(measuredSize);
+        this.applyFitContentSize();
         const layoutSize = this.getLayoutSize(measuredSize);
         const contentBox = this.getViewportContentBox(layoutSize);
         const viewportFrame = this.resolveViewportFrame(layoutSize, contentBox);

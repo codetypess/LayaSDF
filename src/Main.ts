@@ -62,6 +62,7 @@ export class Main extends Laya.Script {
         Laya.timer.once(2000, this, () => {
             const label = new MsdfLabel();
             label.width = 100;
+            label.height = 100;
             label.wordWrap = true;
             label.font = "demo-msdf";
             label.fontSize = 28;

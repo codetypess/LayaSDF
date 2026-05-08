@@ -12,6 +12,7 @@
   "_$comp": [
     {
       "_$type": "7bad1742-6eed-4d8d-81c0-501dc5bf03d6",
+      "enabled": false,
       "scriptPath": "../src/Main.ts"
     },
     {
@@ -40,21 +41,22 @@
       "_$type": "83017376-45c6-4c18-8102-ffc59219b008",
       "name": "MsdfLabel",
       "scriptPath": "../src/msdf/MsdfLabel.ts",
-      "x": 526,
-      "y": 211,
-      "width": 430,
-      "height": 148,
-      "text": "我们不一样我们不一样我们不一样",
+      "x": 540,
+      "y": 278,
+      "width": 193,
+      "height": 192,
+      "text": "我们不一样我们",
       "font": "res://d624774d-e254-48a0-b128-3e03c9e913df",
       "fontSize": 50,
       "color": "rgba(220, 220, 220, 1)",
+      "fitContent": "height",
+      "align": "center",
       "valign": "top",
-      "overflow": "shrink",
       "wordWrap": true,
       "leading": 21,
       "padding": "0,0,0,0",
       "underlineColor": "rgba(103, 82, 82, 1)",
-      "stroke": 3.2,
+      "stroke": 1.2,
       "strokeColor": "rgba(43, 42, 11, 1)",
       "glow": 0,
       "glowColor": "rgba(66, 175, 42, 1)",
@@ -62,6 +64,29 @@
       "shadowOffsetX": 0,
       "shadowOffsetY": 0,
       "shadowColor": "#000000"
+    },
+    {
+      "_$id": "w7gutl6h",
+      "_$type": "Label",
+      "name": "Label(1)",
+      "x": 912,
+      "y": 250,
+      "width": 193,
+      "height": 195,
+      "_mouseState": 2,
+      "text": "我们不一样我们",
+      "font": "res://d624774d-e254-48a0-b128-3e03c9e913df",
+      "fontSize": 50,
+      "color": "rgba(220, 220, 220, 1)",
+      "fitContent": "height",
+      "align": "center",
+      "valign": "top",
+      "wordWrap": true,
+      "leading": 21,
+      "padding": "0,0,0,0",
+      "underlineColor": "rgba(103, 82, 82, 1)",
+      "stroke": 3.2,
+      "strokeColor": "rgba(43, 42, 11, 1)"
     }
   ]
 }
