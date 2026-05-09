@@ -457,7 +457,8 @@ const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-zA-Z]:[\\/]/;
 const DEFAULT_MSDF_SHADER_URL = "resources/shader/MsdfText.shader";
 const RES_URL_PREFIX = "res://";
 const ITALIC_SKEW_DEGREES = 12;
-const BOLD_SCALE_X = 1.04;
+// bold 只加粗笔画，不再放大几何宽度，避免影响测量、换行和容器布局。
+const BOLD_FACE_DILATE = -0.5;
 const LARGE_DECORATION_SCALE_THRESHOLD = 1.75;
 const LARGE_DECORATION_THICKNESS_BOOST = 1;
 const UNDERLINE_EXTRA_OFFSET_MIN = 0.75;
@@ -707,8 +708,8 @@ function mergeBatchGroup(group: MsdfDrawBatchGroup, batch: MsdfDrawBatch): void 
     group.vertexCount += batch.vertices.length >> 1;
 }
 
-function styleScaleX(style: MsdfRichTextStyle): number {
-    return style.bold ? BOLD_SCALE_X : 1;
+function boldFaceDilate(enabled: boolean): number {
+    return enabled ? BOLD_FACE_DILATE : 0;
 }
 
 function styleSkewExtra(height: number, style: MsdfRichTextStyle): number {
@@ -1831,7 +1832,7 @@ export class MsdfText extends Laya.Text {
         }
 
         this._textStyle.bold = next;
-        this.refreshAfterPlainTextLayoutChange();
+        this.refreshAfterPlainTextStyleChange();
     }
 
     override get italic(): boolean {
@@ -3133,7 +3134,7 @@ export class MsdfText extends Laya.Text {
     }
 
     private shouldUseRunsForSource(): boolean {
-        return this._html || this._ubb || this.bold || this.italic;
+        return this._html || this._ubb || this.italic;
     }
 
     private prepareSourceText(): void {
@@ -3502,11 +3503,12 @@ export class MsdfText extends Laya.Text {
         );
         const glowPacked = packVertexColor(this._glowColor);
         const shadowPacked = packVertexColor(this._shadowColor);
+        const faceDilate = this.getEffectiveFaceDilate(this.bold);
         const packedParamsAValue = packParamsAValue(
             this._outlineWidth,
             this._glowSize,
             this._shadowBlur,
-            this._faceDilate
+            faceDilate
         );
         const packedParamsBValue = packParamsBValue(
             this._shadowOffsetX,
@@ -3563,7 +3565,7 @@ export class MsdfText extends Laya.Text {
                 this._outlineWidth,
                 this._glowSize,
                 this._shadowBlur,
-                this._faceDilate,
+                faceDilate,
                 vertexCount
             );
             nextCache.packedParamsAValue = packedParamsAValue;
@@ -4113,9 +4115,7 @@ export class MsdfText extends Laya.Text {
         return {
             text: charText,
             code,
-            width:
-                font.measureTextWidth(charText, style.fontSize, this._letterSpacing) *
-                styleScaleX(style),
+            width: font.measureTextWidth(charText, style.fontSize, this._letterSpacing),
         };
     }
 
@@ -4649,9 +4649,8 @@ export class MsdfText extends Laya.Text {
 
         const metrics = {
             width:
-                (font.measureTextWidth(text, style.fontSize, this._letterSpacing) +
-                    bucket.render.extraWidth) *
-                    styleScaleX(style) +
+                font.measureTextWidth(text, style.fontSize, this._letterSpacing) +
+                bucket.render.extraWidth +
                 styleSkewExtra(bucket.render.height, style),
             height: bucket.render.height,
         };
@@ -5212,6 +5211,7 @@ export class MsdfText extends Laya.Text {
         vertexCount: number
     ): MsdfBatchStyleData {
         const flags = this.getEffectFlagsForStyle(style.outlineWidth, style.outlineColor);
+        const faceDilate = this.getEffectiveFaceDilate(!!style.bold);
 
         return {
             fillColors: createLayoutColorArray(
@@ -5232,7 +5232,7 @@ export class MsdfText extends Laya.Text {
                 style.outlineWidth,
                 this._glowSize,
                 this._shadowBlur,
-                this._faceDilate,
+                faceDilate,
                 vertexCount
             ),
             packedParamsB: createPackedParamsBArray(
@@ -5252,18 +5252,18 @@ export class MsdfText extends Laya.Text {
         shrinkScale: number
     ): Float32Array {
         // 把 run 的局部布局映射到最终顶点：
-        // 先应用 bold/italic/shrink，再叠加行内位置偏移。
+        // 先应用 italic/shrink，再叠加行内位置偏移。
+        // bold 改走 faceDilate，不再改动几何宽度。
         const baseHeight = Math.max(
             layout.height,
             this.requireFont().getLineHeight(style.fontSize)
         );
         const italicOffset = styleSkewExtra(baseHeight, style) * shrinkScale;
-        const scaleX = styleScaleX(style);
         const skewX = style.italic ? Math.tan((ITALIC_SKEW_DEGREES * Math.PI) / 180) : 0;
         const vertices = new Float32Array(layout.vertices.length);
 
         for (let i = 0; i < layout.vertices.length; i += 2) {
-            const localX = layout.vertices[i] * scaleX * shrinkScale;
+            const localX = layout.vertices[i] * shrinkScale;
             const localY = layout.vertices[i + 1] * shrinkScale;
             vertices[i] = x + localX + (style.italic ? italicOffset - skewX * localY : 0);
             vertices[i + 1] = y + localY;
@@ -5310,8 +5310,9 @@ export class MsdfText extends Laya.Text {
             return null;
         }
 
-        // run 级别的形变都在这里完成：bold 拉宽 X，italic 按 Y 倾斜，
+        // run 级别的几何形变都在这里完成：italic 按 Y 倾斜，
         // shrink 统一缩放，x/y 再把这个 run 放到最终行盒中的目标位置。
+        // bold 只通过 faceDilate 改笔画粗细，不参与布局几何。
         const vertices = this.transformRunVertices(layout, style, x, y, shrinkScale);
         const vertexCount = vertices.length >> 1;
         const styleData = this.createRichTextBatchStyleData(layout, style, vertexCount);
@@ -5327,6 +5328,10 @@ export class MsdfText extends Laya.Text {
             packedParamsA: styleData.packedParamsA,
             packedParamsB: styleData.packedParamsB,
         };
+    }
+
+    private getEffectiveFaceDilate(bold: boolean): number {
+        return this._faceDilate + boldFaceDilate(bold);
     }
 
     override _setWidth(value: number): void {
