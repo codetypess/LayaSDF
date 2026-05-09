@@ -1,100 +1,26 @@
-import {
-    MsdfBitmapFont,
-    MsdfOverflow,
-    MsdfRichTextRun,
-    MsdfRichTextStyle,
-    MsdfTextLineMetric,
-    MsdfText,
-} from "./MsdfText";
+import { MsdfBitmapFont, MsdfOverflow, MsdfText, MsdfTextLineMetric } from "./MsdfText";
 
-type Padding = [number, number, number, number];
 type MsdfLabelFitContent = "no" | "yes" | "height";
-type MsdfLabelRefreshKind = "text" | "layout";
 type MsdfTemplateVars = Record<string, unknown>;
 type MsdfFontResourceConfig = {
     textureUrl: string;
     jsonUrl: string;
     shaderUrl: string;
 };
-type MsdfLabelSize = {
-    width: number;
-    height: number;
-};
-type MsdfLabelContentBox = {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-};
-type MsdfLabelParsedText = {
-    text: string;
-    useHtml: boolean;
-};
-type MsdfLabelRichTextRunMetadata = {
-    link?: string | null;
-    clickable?: boolean;
-};
-type MsdfLabelTextSpriteLayout = {
-    layoutWidth: number;
-    layoutHeight: number;
-    wrapWidth: number;
-};
 type MsdfFontJsonAsset = {
     pages?: unknown;
     data?: unknown;
 };
-type MsdfLabelViewportFrame = {
-    width: number;
-    height: number;
-    drawOffsetX: number;
-    drawOffsetY: number;
-    clipRectX: number;
-    clipRectY: number;
-    clipRectWidth: number;
-    clipRectHeight: number;
-};
 type LayaLabelFitFlagHost = {
     _fitFlag?: boolean;
 };
-const NORMALIZE_CR = /\r\n?/g;
-const ESCAPE_CHARS_PATTERN = /\\(\w)/g;
-const ESCAPE_SEQUENCE: Record<string, string> = { "\\n": "\n", "\\t": "\t" };
+
 const JSON_ASSET_PATTERN = /\.json(?:$|[?#])/i;
 const URL_SCHEME_PATTERN = /^(?:[a-z]+:)?\/\//i;
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-zA-Z]:[\\/]/;
 const DEFAULT_MSDF_SHADER_URL = "resources/shader/MsdfText.shader";
 const RES_URL_PREFIX = "res://";
-
-function parsePadding(value: string): Padding {
-    const parts = value.split(",").map((item) => Number(item.trim()) || 0);
-
-    if (parts.length === 1) {
-        return [parts[0], parts[0], parts[0], parts[0]];
-    }
-
-    if (parts.length === 2) {
-        return [parts[0], parts[1], parts[0], parts[1]];
-    }
-
-    if (parts.length === 3) {
-        return [parts[0], parts[1], parts[2], parts[1]];
-    }
-
-    return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0, parts[3] ?? 0];
-}
-
-function colorToVector4(value: string): Laya.Vector4 {
-    const rgba = Laya.ColorUtils.create(value || "#ffffff").arrColor;
-    const r = rgba?.[0] ?? 1;
-    const g = rgba?.[1] ?? 1;
-    const b = rgba?.[2] ?? 1;
-    const a = rgba?.[3] ?? 1;
-    return new Laya.Vector4(r, g, b, a);
-}
-
-function normalizeColor(value: string | null | undefined, fallback: string): string {
-    return value || fallback;
-}
+const DEFAULT_FONT_SIZE = 56;
 
 function normalizeFontJsonAssetData(raw: unknown): MsdfFontJsonAsset | null {
     let data = raw;
@@ -158,29 +84,13 @@ function resolveAssetUrl(baseUrl: string, relativeUrl: string): string {
     return baseSegments.join("/");
 }
 
-function sameRichStyle(left: MsdfRichTextStyle, right: MsdfRichTextStyle): boolean {
-    return (
-        left.fontSize === right.fontSize &&
-        left.textColorCss === right.textColorCss &&
-        (left.underlineColorCss ?? "") === (right.underlineColorCss ?? "") &&
-        (left.strikethroughColorCss ?? "") === (right.strikethroughColorCss ?? "") &&
-        left.outlineColorCss === right.outlineColorCss &&
-        left.outlineWidth === right.outlineWidth &&
-        !!left.bold === !!right.bold &&
-        !!left.italic === !!right.italic &&
-        !!left.underline === !!right.underline &&
-        !!left.strikethrough === !!right.strikethrough &&
-        (left.align ?? "") === (right.align ?? "") &&
-        (left.alignItems ?? "") === (right.alignItems ?? "")
-    );
-}
-
 function isNil(value: unknown): value is null | undefined {
     return value === null || value === undefined;
 }
 
-function hasValue<T>(value: T | null | undefined): value is T {
-    return !isNil(value);
+function colorToVector4(value: string, fallback: string = "#ffffff"): Laya.Vector4 {
+    const rgba = Laya.ColorUtils.create(value || fallback).arrColor;
+    return new Laya.Vector4(rgba?.[0] ?? 1, rgba?.[1] ?? 1, rgba?.[2] ?? 1, rgba?.[3] ?? 1);
 }
 
 @Laya.regClass()
@@ -195,52 +105,18 @@ export class MsdfLabel extends Laya.Label {
     private _textSprite!: MsdfText;
     private _font: MsdfBitmapFont | null = null;
     private _resourceKey = "";
-    private _hasExplicitWidth = false;
-    private _hasExplicitHeight = false;
-
-    private _text = "";
-    private _fontSize = 56;
-    private _letterSpacing = 0;
-    private _faceDilate = 0;
-    private _color = "#ffffff";
-    private _align = "left";
-    private _valign = "top";
-    private _alignItems = "middle";
-    private _leading = 0;
-    private _padding = "0,0,0,0";
-    private _stroke = 0;
-    private _strokeColor = "#000000";
-    private _glow = 0;
-    private _glowColor = "#ffffff";
-    private _shadowColor = "#000000";
-    private _shadowBlur = 0;
-    private _shadowOffsetX = 0;
-    private _shadowOffsetY = 0;
-    private _wordWrap = false;
-    private _bold = false;
-    private _italic = false;
-    private _underline = false;
-    private _underlineColor = "";
-    private _strikethrough = false;
-    private _strikethroughColor = "";
-    private _html = false;
-    private _ubb = false;
+    private _fontResolveToken = 0;
     private _fontName = "";
-    private _maxWidth = 0;
-    private _overflow: MsdfOverflow = "visible";
-    protected override _fitContent: MsdfLabelFitContent = "no";
-    private _msdfFitFlag = false;
-    private _ignoreLang = false;
-    private _templateVars: MsdfTemplateVars | null = null;
-    private _htmlParseOptions: Laya.HtmlParseOptions | null = null;
-    private _parseEscapeChars = true;
-
     private _fontTextureUrl = "";
     private _fontJsonUrl = "";
     private _fontShaderUrl = "";
-    private _paddingValues: Padding = [0, 0, 0, 0];
-    private _maxOutlineWidth = 0;
-    private _fontResolveToken = 0;
+    private _hasExplicitWidth = false;
+    private _hasExplicitHeight = false;
+    private _msdfFitFlag = false;
+    private _glowColor = "#ffffff";
+    private _shadowColor = "#000000";
+
+    protected override _fitContent: MsdfLabelFitContent = "no";
 
     constructor(text?: string) {
         super();
@@ -251,11 +127,14 @@ export class MsdfLabel extends Laya.Label {
     }
 
     protected override createChildren(): void {
-        if (!this._textSprite) {
-            this._textSprite = new MsdfText();
-            this.configureInternalTextSprite(this._textSprite);
-            this.addChild(this._textSprite);
+        if (this._textSprite) {
+            return;
         }
+
+        this._textSprite = new MsdfText();
+        this._textSprite.fontSize = DEFAULT_FONT_SIZE;
+        this.configureInternalTextSprite(this._textSprite);
+        this.addChild(this._textSprite);
     }
 
     override onAfterDeserialize(): void {
@@ -263,14 +142,26 @@ export class MsdfLabel extends Laya.Label {
 
         this.configureInternalTextSprite(this._textSprite);
         this.pruneLegacySerializedChildren();
+        this.syncTextHostLayout();
     }
 
     private configureInternalTextSprite(textSprite: MsdfText): void {
         textSprite.mouseThrough = true;
-        textSprite.visible = false;
+        textSprite.visible = true;
         textSprite.hideFlags = Laya.HideFlags.HideAndDontSave;
+        textSprite._onPostLayout = () => this.handleTextPostLayout();
+        textSprite.off(Laya.Event.CHANGE, this, this.handleTextFieldChange);
+        textSprite.on(Laya.Event.CHANGE, this, this.handleTextFieldChange);
         this._tf = textSprite;
         this._tf.hideFlags = Laya.HideFlags.HideAndDontSave;
+    }
+
+    private handleTextFieldChange(): void {
+        this.event(Laya.Event.CHANGE);
+        if (!this._isWidthSet || !this._isHeightSet) {
+            this.onCompResize();
+        }
+        this.syncTextHostLayout();
     }
 
     private pruneLegacySerializedChildren(): void {
@@ -308,7 +199,6 @@ export class MsdfLabel extends Laya.Label {
         }
 
         let task = MsdfLabel.fontCache.get(key);
-
         if (!task) {
             task = (async () => {
                 await Laya.loader.load(shaderUrl);
@@ -343,10 +233,6 @@ export class MsdfLabel extends Laya.Label {
         MsdfLabel.registeredFonts.delete(name);
     }
 
-    private static replaceEscapeChar(word: string): string {
-        return ESCAPE_SEQUENCE[word] ?? word;
-    }
-
     private static getFontResourceKey(
         textureUrl: string,
         jsonUrl: string,
@@ -355,140 +241,84 @@ export class MsdfLabel extends Laya.Label {
         return `${shaderUrl}|${textureUrl}|${jsonUrl}`;
     }
 
-    private scheduleRefresh(kind: MsdfLabelRefreshKind = "text"): void {
-        this.callLater(kind === "text" ? this.changeText : this.updateLayoutFrame);
-    }
-
     override get text(): string {
-        return this._text;
+        return this._textSprite.text;
     }
 
     override set text(value: string) {
-        let nextValue = isNil(value) ? "" : typeof value === "string" ? value : `${value}`;
-        const langPacks = (Laya.Text as typeof Laya.Text & { langPacks?: Record<string, string> })
-            ?.langPacks;
-        if (!this._ignoreLang && langPacks) {
-            nextValue = langPacks[nextValue] || nextValue;
-        }
-
-        if (this._text === nextValue) {
-            return;
-        }
-        this._text = nextValue;
-        this.scheduleRefresh();
-        this.event(Laya.Event.CHANGE);
+        this._textSprite.text = value;
     }
 
     override get fontSize(): number {
-        return this._fontSize;
+        return this._textSprite.fontSize;
     }
 
     override set fontSize(value: number) {
-        if (this._fontSize === value) {
-            return;
-        }
-        this._fontSize = value;
-        this.scheduleRefresh();
+        this._textSprite.fontSize = value;
     }
 
     get letterSpacing(): number {
-        return this._letterSpacing;
+        return this._textSprite.letterSpacing;
     }
 
     set letterSpacing(value: number) {
-        if (this._letterSpacing === value) {
-            return;
-        }
-        this._letterSpacing = value;
-        this.scheduleRefresh();
+        this._textSprite.letterSpacing = value;
     }
 
     get faceDilate(): number {
-        return this._faceDilate;
+        return this._textSprite.faceDilate;
     }
 
     set faceDilate(value: number) {
-        const next = Number.isFinite(value) ? value : 0;
-        if (this._faceDilate === next) {
-            return;
-        }
-
-        this._faceDilate = next;
-        this.scheduleRefresh();
+        this._textSprite.faceDilate = value;
     }
 
     override get color(): string {
-        return this._color;
+        return this._textSprite.color;
     }
 
     override set color(value: string) {
-        if (this._color === value) {
-            return;
-        }
-        this._color = value || "#ffffff";
-        this.scheduleRefresh();
+        this._textSprite.color = value;
     }
 
     override get align(): string {
-        return this._align;
+        return this._textSprite.align;
     }
 
     override set align(value: string) {
-        if (this._align === value) {
-            return;
-        }
-        this._align = value || "left";
-        this.scheduleRefresh();
+        this._textSprite.align = value;
     }
 
     override get valign(): string {
-        return this._valign;
+        return this._textSprite.valign;
     }
 
     override set valign(value: string) {
-        if (this._valign === value) {
-            return;
-        }
-        this._valign = value || "top";
-        this.scheduleRefresh("layout");
+        this._textSprite.valign = value;
     }
 
     override get alignItems(): string {
-        return this._alignItems;
+        return this._textSprite.alignItems;
     }
 
     override set alignItems(value: string) {
-        const next = value || "middle";
-        if (this._alignItems === next) {
-            return;
-        }
-        this._alignItems = next;
-        this.scheduleRefresh();
+        this._textSprite.alignItems = value;
     }
 
     override get leading(): number {
-        return this._leading;
+        return this._textSprite.leading;
     }
 
     override set leading(value: number) {
-        if (this._leading === value) {
-            return;
-        }
-        this._leading = value;
-        this.scheduleRefresh();
+        this._textSprite.leading = value;
     }
 
     override get padding(): string {
-        return this._padding;
+        return this._textSprite.padding.join(",");
     }
 
     override set padding(value: string) {
-        if (this._padding === value) {
-            return;
-        }
-        this._padding = value || "0,0,0,0";
-        this._paddingValues = parsePadding(this._padding);
-        this.scheduleRefresh();
+        this._textSprite.padding = value;
     }
 
     @Laya.property({
@@ -498,27 +328,19 @@ export class MsdfLabel extends Laya.Label {
         fractionDigits: 1,
     })
     override get stroke(): number {
-        return this._stroke;
+        return this._textSprite.stroke;
     }
 
     override set stroke(value: number) {
-        if (this._stroke === value) {
-            return;
-        }
-        this._stroke = value;
-        this.scheduleRefresh();
+        this._textSprite.stroke = value;
     }
 
     override get strokeColor(): string {
-        return this._strokeColor;
+        return this._textSprite.strokeColor;
     }
 
     override set strokeColor(value: string) {
-        if (this._strokeColor === value) {
-            return;
-        }
-        this._strokeColor = value || "#000000";
-        this.scheduleRefresh();
+        this._textSprite.strokeColor = value;
     }
 
     @Laya.property({
@@ -528,16 +350,11 @@ export class MsdfLabel extends Laya.Label {
         fractionDigits: 1,
     })
     get glow(): number {
-        return this._glow;
+        return this._textSprite.glowSize;
     }
 
     set glow(value: number) {
-        const next = Math.max(0, value || 0);
-        if (this._glow === next) {
-            return;
-        }
-        this._glow = next;
-        this.scheduleRefresh();
+        this._textSprite.setGlowStyle(colorToVector4(this._glowColor), value);
     }
 
     @Laya.property({
@@ -549,11 +366,8 @@ export class MsdfLabel extends Laya.Label {
     }
 
     set glowColor(value: string) {
-        if (this._glowColor === value) {
-            return;
-        }
         this._glowColor = value || "#ffffff";
-        this.scheduleRefresh();
+        this._textSprite.setGlowStyle(colorToVector4(this._glowColor), this.glow);
     }
 
     @Laya.property({
@@ -563,16 +377,16 @@ export class MsdfLabel extends Laya.Label {
         fractionDigits: 1,
     })
     get shadowBlur(): number {
-        return this._shadowBlur;
+        return this._textSprite.shadowBlur;
     }
 
     set shadowBlur(value: number) {
-        const next = Math.max(0, value || 0);
-        if (this._shadowBlur === next) {
-            return;
-        }
-        this._shadowBlur = next;
-        this.scheduleRefresh();
+        this._textSprite.setShadowStyle(
+            colorToVector4(this._shadowColor, "#000000"),
+            this.shadowOffsetX,
+            this.shadowOffsetY,
+            value
+        );
     }
 
     @Laya.property({
@@ -581,15 +395,16 @@ export class MsdfLabel extends Laya.Label {
         fractionDigits: 1,
     })
     get shadowOffsetX(): number {
-        return this._shadowOffsetX;
+        return this._textSprite.shadowOffsetX;
     }
 
     set shadowOffsetX(value: number) {
-        if (this._shadowOffsetX === value) {
-            return;
-        }
-        this._shadowOffsetX = value || 0;
-        this.scheduleRefresh();
+        this._textSprite.setShadowStyle(
+            colorToVector4(this._shadowColor, "#000000"),
+            value,
+            this.shadowOffsetY,
+            this.shadowBlur
+        );
     }
 
     @Laya.property({
@@ -598,15 +413,16 @@ export class MsdfLabel extends Laya.Label {
         fractionDigits: 1,
     })
     get shadowOffsetY(): number {
-        return this._shadowOffsetY;
+        return this._textSprite.shadowOffsetY;
     }
 
     set shadowOffsetY(value: number) {
-        if (this._shadowOffsetY === value) {
-            return;
-        }
-        this._shadowOffsetY = value || 0;
-        this.scheduleRefresh();
+        this._textSprite.setShadowStyle(
+            colorToVector4(this._shadowColor, "#000000"),
+            this.shadowOffsetX,
+            value,
+            this.shadowBlur
+        );
     }
 
     @Laya.property({
@@ -618,149 +434,101 @@ export class MsdfLabel extends Laya.Label {
     }
 
     set shadowColor(value: string) {
-        if (this._shadowColor === value) {
-            return;
-        }
         this._shadowColor = value || "#000000";
-        this.scheduleRefresh();
+        this._textSprite.setShadowStyle(
+            colorToVector4(this._shadowColor, "#000000"),
+            this.shadowOffsetX,
+            this.shadowOffsetY,
+            this.shadowBlur
+        );
     }
 
     override get bgColor(): string {
-        return super.bgColor;
+        return this._textSprite.bgColor;
     }
 
     override set bgColor(value: string) {
-        if (this.bgColor === value) {
-            return;
-        }
-        super.bgColor = value;
-        this.scheduleRefresh("layout");
+        this._textSprite.bgColor = value;
     }
 
     override get borderColor(): string {
-        return super.borderColor;
+        return this._textSprite.borderColor;
     }
 
     override set borderColor(value: string) {
-        if (this.borderColor === value) {
-            return;
-        }
-        super.borderColor = value;
-        this.scheduleRefresh("layout");
+        this._textSprite.borderColor = value;
     }
 
     override get wordWrap(): boolean {
-        return this._wordWrap;
+        return this._textSprite.wordWrap;
     }
 
     override set wordWrap(value: boolean) {
-        if (this._wordWrap === value) {
-            return;
-        }
-        this._wordWrap = value;
-        this.scheduleRefresh();
+        this._textSprite.wordWrap = value;
     }
 
     override get bold(): boolean {
-        return this._bold;
+        return this._textSprite.bold;
     }
 
     override set bold(value: boolean) {
-        const next = !!value;
-        if (this._bold === next) {
-            return;
-        }
-        this._bold = next;
-        this.scheduleRefresh();
+        this._textSprite.bold = value;
     }
 
     override get italic(): boolean {
-        return this._italic;
+        return this._textSprite.italic;
     }
 
     override set italic(value: boolean) {
-        const next = !!value;
-        if (this._italic === next) {
-            return;
-        }
-        this._italic = next;
-        this.scheduleRefresh();
+        this._textSprite.italic = value;
     }
 
     override get underline(): boolean {
-        return this._underline;
+        return this._textSprite.underline;
     }
 
     override set underline(value: boolean) {
-        const next = !!value;
-        if (this._underline === next) {
-            return;
-        }
-        this._underline = next;
-        this.scheduleRefresh();
+        this._textSprite.underline = value;
     }
 
     override get underlineColor(): string {
-        return this._underlineColor;
+        return this._textSprite.underlineColor;
     }
 
     override set underlineColor(value: string) {
-        if (this._underlineColor === value) {
-            return;
-        }
-        this._underlineColor = value || "";
-        this.scheduleRefresh();
+        this._textSprite.underlineColor = value;
     }
 
     override get strikethrough(): boolean {
-        return this._strikethrough;
+        return this._textSprite.strikethrough;
     }
 
     override set strikethrough(value: boolean) {
-        const next = !!value;
-        if (this._strikethrough === next) {
-            return;
-        }
-        this._strikethrough = next;
-        this.scheduleRefresh();
+        this._textSprite.strikethrough = value;
     }
 
     override get strikethroughColor(): string {
-        return this._strikethroughColor;
+        return this._textSprite.strikethroughColor;
     }
 
     override set strikethroughColor(value: string) {
-        if (this._strikethroughColor === value) {
-            return;
-        }
-        this._strikethroughColor = value || "";
-        this.scheduleRefresh();
+        this._textSprite.strikethroughColor = value;
     }
 
     override get html(): boolean {
-        return this._html;
+        return this._textSprite.html;
     }
 
     override set html(value: boolean) {
-        const next = !!value;
-        if (this._html === next) {
-            return;
-        }
-        this._html = next;
-        this.scheduleRefresh();
+        this._textSprite.html = value;
     }
 
     override get ubb(): boolean {
-        return this._ubb;
+        return this._textSprite.ubb;
     }
 
     override set ubb(value: boolean) {
-        const next = !!value;
-        if (this._ubb === next) {
-            return;
-        }
-        this._ubb = next;
-        this.scheduleRefresh();
+        this._textSprite.ubb = value;
     }
 
     @Laya.property({
@@ -806,31 +574,19 @@ export class MsdfLabel extends Laya.Label {
     }
 
     override get maxWidth(): number {
-        return this._maxWidth;
+        return this._textSprite.maxWidth;
     }
 
     override set maxWidth(value: number) {
-        const next = Math.max(0, value || 0);
-        if (this._maxWidth === next) {
-            return;
-        }
-
-        this._maxWidth = next;
-        this.scheduleRefresh();
+        this._textSprite.maxWidth = value;
     }
 
     override get overflow(): MsdfOverflow {
-        return this._overflow;
+        return this._textSprite.overflow;
     }
 
     override set overflow(value: MsdfOverflow) {
-        const next = value || "visible";
-        if (this._overflow === next) {
-            return;
-        }
-
-        this._overflow = next;
-        this.scheduleRefresh();
+        this._textSprite.overflow = value;
     }
 
     override get fitContent(): MsdfLabelFitContent {
@@ -844,14 +600,14 @@ export class MsdfLabel extends Laya.Label {
         }
 
         if (this.isFitContentValue(next) && !Laya.SerializeUtil.isDeserializing) {
-            this.ensureMeasurementUpToDate();
+            this._textSprite.typeset();
             if (this.canApplyFitContentInCurrentMode()) {
-                this.writeFitContentSize(this.getNativeFitContentSize(), next);
+                this.writeFitContentSize(this._textSprite.getFitContentSize(), next);
             }
         }
 
         this._fitContent = next;
-        this.scheduleRefresh();
+        this.syncTextHostLayout();
     }
 
     override get textField(): Laya.Text {
@@ -863,47 +619,33 @@ export class MsdfLabel extends Laya.Label {
     }
 
     override get ignoreLang(): boolean {
-        return this._ignoreLang;
+        return this._textSprite.ignoreLang;
     }
 
     override set ignoreLang(value: boolean) {
-        const next = !!value;
-        if (this._ignoreLang === next) {
+        if (this._textSprite.ignoreLang === value) {
             return;
         }
 
-        this._ignoreLang = next;
-        this.text = this._text;
+        const previous = this._textSprite.text;
+        this._textSprite.ignoreLang = value;
+        this._textSprite.text = previous;
     }
 
     override get templateVars(): MsdfTemplateVars {
-        return this._templateVars!;
+        return this._textSprite.templateVars as MsdfTemplateVars;
     }
 
     override set templateVars(value: MsdfTemplateVars | boolean) {
-        const nextValue = value as MsdfTemplateVars | boolean | null | undefined;
-
-        if (!this._templateVars && !nextValue) {
-            return;
-        }
-
-        if (nextValue === true) {
-            this._templateVars = {};
-        } else if (nextValue === false || isNil(nextValue)) {
-            this._templateVars = null;
-        } else {
-            this._templateVars = nextValue;
-        }
-
-        this.scheduleRefresh();
+        this._textSprite.templateVars = value as Record<string, string> | boolean;
     }
 
     get htmlParseOptions(): Laya.HtmlParseOptions | null {
-        return this._htmlParseOptions;
+        return this._textSprite.htmlParseOptions;
     }
 
     set htmlParseOptions(value: Laya.HtmlParseOptions | null) {
-        this._htmlParseOptions = value;
+        this._textSprite.htmlParseOptions = value as Laya.HtmlParseOptions;
     }
 
     get lines(): ReadonlyArray<MsdfTextLineMetric> {
@@ -915,7 +657,7 @@ export class MsdfLabel extends Laya.Label {
     }
 
     set scrollX(value: number) {
-        this.updateScrollOffset("x", value);
+        this._textSprite.scrollX = value;
     }
 
     get scrollY(): number {
@@ -923,29 +665,23 @@ export class MsdfLabel extends Laya.Label {
     }
 
     set scrollY(value: number) {
-        this.updateScrollOffset("y", value);
+        this._textSprite.scrollY = value;
     }
 
     get maxScrollX(): number {
-        this.ensureMeasurementUpToDate();
         return this._textSprite.maxScrollX;
     }
 
     get maxScrollY(): number {
-        this.ensureMeasurementUpToDate();
         return this._textSprite.maxScrollY;
     }
 
     get textWidth(): number {
-        this.ensureMeasurementUpToDate();
-        const effectInsets = this.getEffectInsets();
-        return this._textSprite.contentWidth + effectInsets[1] + effectInsets[3];
+        return this._textSprite.textWidth;
     }
 
     get textHeight(): number {
-        this.ensureMeasurementUpToDate();
-        const effectInsets = this.getEffectInsets();
-        return this._textSprite.contentHeight + effectInsets[0] + effectInsets[2];
+        return this._textSprite.textHeight;
     }
 
     get fontTextureUrl(): string {
@@ -992,34 +728,15 @@ export class MsdfLabel extends Laya.Label {
     }
 
     protected override measureWidth(): number {
-        const effectInsets = this.getEffectInsets();
-        return (
-            this._textSprite.contentWidth +
-            this._paddingValues[1] +
-            this._paddingValues[3] +
-            effectInsets[1] +
-            effectInsets[3]
-        );
+        return this._textSprite.width;
     }
 
     protected override measureHeight(): number {
-        const effectInsets = this.getEffectInsets();
-        return (
-            this._textSprite.contentHeight +
-            this._paddingValues[0] +
-            this._paddingValues[2] +
-            effectInsets[0] +
-            effectInsets[2]
-        );
-    }
-
-    protected override commitMeasure(): void {
-        this.runCallLater(this.changeText);
-        super.commitMeasure();
+        return this._textSprite.height;
     }
 
     override get_width(): number {
-        if (this._hasExplicitWidth || this._text) {
+        if (this._hasExplicitWidth || this._textSprite.text) {
             return super.get_width();
         }
 
@@ -1027,7 +744,7 @@ export class MsdfLabel extends Laya.Label {
     }
 
     override get_height(): number {
-        if (this._hasExplicitHeight || this._text) {
+        if (this._hasExplicitHeight || this._textSprite.text) {
             return super.get_height();
         }
 
@@ -1036,7 +753,7 @@ export class MsdfLabel extends Laya.Label {
 
     protected override _sizeChanged(): void {
         super._sizeChanged();
-        this.scheduleRefresh();
+        this.syncTextHostLayout();
     }
 
     override set_width(value: number): void {
@@ -1050,6 +767,7 @@ export class MsdfLabel extends Laya.Label {
 
         this._hasExplicitWidth = Number.isFinite(value) && value >= 0;
         super.set_width(value);
+        this.syncTextHostLayout();
     }
 
     override set_height(value: number): void {
@@ -1063,6 +781,7 @@ export class MsdfLabel extends Laya.Label {
 
         this._hasExplicitHeight = Number.isFinite(value) && value >= 0;
         super.set_height(value);
+        this.syncTextHostLayout();
     }
 
     override set_dataSource(value: unknown): void {
@@ -1073,6 +792,100 @@ export class MsdfLabel extends Laya.Label {
         }
 
         super.set_dataSource(value);
+    }
+
+    override setVar(name: string, value: unknown): this {
+        this._textSprite.setVar(name, value);
+        return this;
+    }
+
+    changeText(text?: string): void {
+        if (typeof text === "string") {
+            this.text = text;
+            return;
+        }
+
+        this._textSprite.refresh();
+    }
+
+    private handleTextPostLayout(): void {
+        if (!this.isFitContentValue(this._fitContent) || !this.canApplyFitContentInCurrentMode()) {
+            return;
+        }
+
+        this.writeFitContentSize(this._textSprite.getFitContentSize(), this._fitContent);
+    }
+
+    private syncTextHostLayout(): void {
+        if (!this._textSprite) {
+            return;
+        }
+
+        this._textSprite.pos(0, 0);
+        this._textSprite.setLabelHostLayout(
+            super.get_width(),
+            super.get_height(),
+            this._hasExplicitWidth,
+            this._hasExplicitHeight
+        );
+    }
+
+    private isFitContentValue(value: MsdfLabelFitContent): boolean {
+        return value === "yes" || value === "height";
+    }
+
+    private isEditingNode(): boolean {
+        return this._getBit(Laya.NodeFlags.EDITING_NODE);
+    }
+
+    private canApplyFitContentInCurrentMode(): boolean {
+        return (
+            !this.isEditingNode() ||
+            (this._textSprite.textWidth > 0 && this._textSprite.textHeight > 0)
+        );
+    }
+
+    private canBlockExternalWidthInCurrentMode(): boolean {
+        return !this.isEditingNode() || this._textSprite.textWidth > 0;
+    }
+
+    private canBlockExternalHeightInCurrentMode(): boolean {
+        return !this.isEditingNode() || this._textSprite.textHeight > 0;
+    }
+
+    private withFitContentWrite<T>(callback: () => T): T {
+        const nativeLabel = this as unknown as LayaLabelFitFlagHost;
+        const previousMsdfFitFlag = this._msdfFitFlag;
+        const hadNativeFitFlag = Object.prototype.hasOwnProperty.call(nativeLabel, "_fitFlag");
+        const previousNativeFitFlag = nativeLabel._fitFlag;
+
+        this._msdfFitFlag = true;
+        nativeLabel._fitFlag = true;
+        try {
+            return callback();
+        } finally {
+            this._msdfFitFlag = previousMsdfFitFlag;
+            if (hadNativeFitFlag) {
+                nativeLabel._fitFlag = previousNativeFitFlag;
+            } else {
+                delete nativeLabel._fitFlag;
+            }
+        }
+    }
+
+    private writeFitContentSize(
+        size: { width: number; height: number },
+        fitContent: MsdfLabelFitContent
+    ): void {
+        this.withFitContentWrite(() => {
+            if (fitContent === "height") {
+                this.set_height(size.height);
+                return;
+            }
+
+            this.set_width(size.width);
+            this.set_height(size.height);
+        });
     }
 
     private resolveFontResources(value: string): MsdfFontResourceConfig | null {
@@ -1179,74 +992,6 @@ export class MsdfLabel extends Laya.Label {
         };
     }
 
-    override setVar(name: string, value: unknown): this {
-        if (!this._templateVars) {
-            this._templateVars = {};
-        }
-        this._templateVars[name] = value;
-        this.scheduleRefresh();
-        return this;
-    }
-
-    private appendTemplateValue(result: string, value: unknown): string {
-        return result + (value as string | number | boolean | bigint | object | null | undefined);
-    }
-
-    private parseTemplate(template: string): string {
-        if (!this._templateVars) {
-            return template;
-        }
-
-        let pos1 = 0;
-        let pos2 = 0;
-        let pos3 = 0;
-        let result = "";
-
-        while ((pos2 = template.indexOf("{", pos1)) !== -1) {
-            if (pos2 > 0 && template.charCodeAt(pos2 - 1) === 92) {
-                result += template.substring(pos1, pos2 - 1);
-                result += "{";
-                pos1 = pos2 + 1;
-                continue;
-            }
-
-            result += template.substring(pos1, pos2);
-            pos1 = pos2;
-            pos2 = template.indexOf("}", pos1);
-            if (pos2 === -1) {
-                break;
-            }
-
-            if (pos2 === pos1 + 1) {
-                result += template.substring(pos1, pos1 + 2);
-                pos1 = pos2 + 1;
-                continue;
-            }
-
-            const tag = template.substring(pos1 + 1, pos2);
-            pos3 = tag.indexOf("=");
-            if (pos3 !== -1) {
-                const value = this._templateVars[tag.substring(0, pos3)];
-                result = isNil(value)
-                    ? result + tag.substring(pos3 + 1)
-                    : this.appendTemplateValue(result, value);
-            } else {
-                const value = this._templateVars[tag];
-                if (hasValue(value)) {
-                    result = this.appendTemplateValue(result, value);
-                }
-            }
-
-            pos1 = pos2 + 1;
-        }
-
-        if (pos1 < template.length) {
-            result += template.substring(pos1);
-        }
-
-        return result;
-    }
-
     private applyFontResources(resources: MsdfFontResourceConfig): void {
         this.setFontResourceUrls(resources.textureUrl, resources.jsonUrl, resources.shaderUrl);
     }
@@ -1271,8 +1016,7 @@ export class MsdfLabel extends Laya.Label {
     }
 
     private clearTextSprite(): void {
-        this._textSprite.visible = false;
-        this._textSprite.graphics.clear(true);
+        this._textSprite.clearFont();
         this._textSprite.size(0, 0);
     }
 
@@ -1281,34 +1025,17 @@ export class MsdfLabel extends Laya.Label {
         this._font = null;
     }
 
-    private ensureMeasurementUpToDate(): void {
-        this.runCallLater(this.changeText);
-        this.runCallLater(this.updateLayoutFrame);
-    }
-
     private applyLoadedFont(font: MsdfBitmapFont): void {
         this._font = font;
         this._textSprite.resetFont(font);
-        this._textSprite.visible = true;
-        this.changeText();
+        this.syncTextHostLayout();
         this.event(Laya.Event.LOADED);
-    }
-
-    private updateScrollOffset(axis: "x" | "y", value: number): void {
-        if (axis === "x") {
-            this._textSprite.scrollX = value || 0;
-        } else {
-            this._textSprite.scrollY = value || 0;
-        }
-
-        this.updateLayoutFrame();
     }
 
     private reloadFont(): void {
         if (!this.hasCompleteFontResources()) {
             this.clearFontState();
             this.clearTextSprite();
-            this.drawBackground(this.width, this.height);
             return;
         }
 
@@ -1337,497 +1064,5 @@ export class MsdfLabel extends Laya.Label {
             .catch((error) => {
                 console.error("[MsdfLabel] failed to load font resources", error);
             });
-    }
-
-    private getMeasuredLabelSize(effectInsets: Padding): MsdfLabelSize {
-        return {
-            width:
-                this._textSprite.contentWidth +
-                this._paddingValues[1] +
-                this._paddingValues[3] +
-                effectInsets[1] +
-                effectInsets[3],
-            height:
-                this._textSprite.contentHeight +
-                this._paddingValues[0] +
-                this._paddingValues[2] +
-                effectInsets[0] +
-                effectInsets[2],
-        };
-    }
-
-    private getNativeFitContentSize(): MsdfLabelSize {
-        const contentWidth = this._textSprite.contentWidth;
-        const contentHeight = this._textSprite.contentHeight;
-
-        return {
-            width:
-                contentWidth > 0
-                    ? contentWidth + this._paddingValues[1] + this._paddingValues[3]
-                    : 0,
-            height:
-                contentHeight > 0
-                    ? contentHeight + this._paddingValues[0] + this._paddingValues[2]
-                    : 0,
-        };
-    }
-
-    private getLayoutSize(measuredSize: MsdfLabelSize): MsdfLabelSize {
-        return {
-            width: this._hasExplicitWidth ? this.width : measuredSize.width,
-            height: this._hasExplicitHeight ? this.height : measuredSize.height,
-        };
-    }
-
-    private getContentBox(layoutSize: MsdfLabelSize): MsdfLabelContentBox {
-        return {
-            x: this._paddingValues[3],
-            y: this._paddingValues[0],
-            width: Math.max(layoutSize.width - this._paddingValues[1] - this._paddingValues[3], 0),
-            height: Math.max(
-                layoutSize.height - this._paddingValues[0] - this._paddingValues[2],
-                0
-            ),
-        };
-    }
-
-    private createBaseTextStyle(): Laya.TextStyle {
-        const style = new Laya.TextStyle();
-
-        style.fontSize = this._fontSize;
-        style.color = this._color;
-        style.bold = this._bold;
-        style.italic = this._italic;
-        style.underline = this._underline;
-        style.underlineColor = this._underlineColor || "";
-        style.strikethrough = this._strikethrough;
-        style.strikethroughColor = this._strikethroughColor || "";
-        style.align = this._align;
-        style.alignItems = this._alignItems;
-        style.valign = this._valign;
-        style.leading = this._leading;
-        style.stroke = this._stroke;
-        style.strokeColor = this._strokeColor;
-
-        return style;
-    }
-
-    private toRichTextStyle(style: Laya.TextStyle | null | undefined): MsdfRichTextStyle {
-        const textColorCss = normalizeColor(style?.color, this._color);
-        const underlineColorCss = style?.underlineColor || null;
-        const strikethroughColorCss = style?.strikethroughColor || null;
-        const outlineColorCss = normalizeColor(style?.strokeColor, this._strokeColor);
-        const strokeValue = style?.stroke;
-        const outlineWidth =
-            typeof strokeValue === "number"
-                ? strokeValue
-                : Number(strokeValue ?? this._stroke) || 0;
-
-        return {
-            fontSize: Number(style?.fontSize ?? this._fontSize) || this._fontSize,
-            textColor: colorToVector4(textColorCss),
-            textColorCss,
-            underlineColor: underlineColorCss ? colorToVector4(underlineColorCss) : null,
-            underlineColorCss,
-            strikethroughColor: strikethroughColorCss
-                ? colorToVector4(strikethroughColorCss)
-                : null,
-            strikethroughColorCss,
-            outlineColor: colorToVector4(outlineColorCss),
-            outlineColorCss,
-            outlineWidth,
-            bold: !!style?.bold,
-            italic: !!style?.italic,
-            underline: !!style?.underline,
-            strikethrough: !!style?.strikethrough,
-            align: style?.align || this._align,
-            alignItems: style?.alignItems || this._alignItems,
-        };
-    }
-
-    private appendRichTextRun(
-        runs: MsdfRichTextRun[],
-        text: string,
-        style: MsdfRichTextStyle,
-        link: string | null = null,
-        clickable: boolean = false
-    ): void {
-        if (!text) {
-            return;
-        }
-
-        const previous = runs[runs.length - 1] as
-            | (MsdfRichTextRun & MsdfLabelRichTextRunMetadata)
-            | undefined;
-        if (
-            previous &&
-            sameRichStyle(previous.style, style) &&
-            (previous.link ?? null) === (link ?? null) &&
-            !!previous.clickable === clickable
-        ) {
-            previous.text += text;
-            return;
-        }
-
-        const run: MsdfRichTextRun & MsdfLabelRichTextRunMetadata = {
-            text,
-            style,
-            link,
-            clickable,
-        };
-        runs.push(run);
-    }
-
-    private normalizeSourceText(): string {
-        let sourceText = this._text.replace(NORMALIZE_CR, "\n");
-        if (this._parseEscapeChars) {
-            sourceText = sourceText.replace(ESCAPE_CHARS_PATTERN, MsdfLabel.replaceEscapeChar);
-        }
-        if (this._templateVars) {
-            sourceText = this.parseTemplate(sourceText);
-        }
-        return sourceText;
-    }
-
-    private resolveParsedText(sourceText: string): MsdfLabelParsedText {
-        let parsedText = sourceText;
-        let useHtml = this._html;
-
-        if (this._ubb) {
-            const ubbParser = Laya.UBBParser?.defaultParser;
-            if (ubbParser) {
-                parsedText = ubbParser.parse(parsedText);
-                useHtml = true;
-            }
-        }
-
-        return { text: parsedText, useHtml };
-    }
-
-    private appendHtmlRuns(
-        runs: MsdfRichTextRun[],
-        text: string,
-        baseStyle: Laya.TextStyle
-    ): boolean {
-        const htmlParser = Laya.HtmlParser?.defaultParser;
-        const htmlElementType = Laya.HtmlElementType;
-        const htmlElement = Laya.HtmlElement;
-
-        if (!htmlParser || !htmlElementType) {
-            return false;
-        }
-
-        const elements: Laya.HtmlElement[] = [];
-        htmlParser.parse(text, baseStyle, elements, this._htmlParseOptions ?? undefined);
-        let currentLink: string | null = null;
-
-        for (const element of elements) {
-            if (element.type === htmlElementType.Link) {
-                currentLink = element.getAttrString("href", "");
-                continue;
-            }
-
-            if (element.type === htmlElementType.LinkEnd) {
-                currentLink = null;
-                continue;
-            }
-
-            if (element.type !== htmlElementType.Text || !element.text) {
-                continue;
-            }
-
-            const richStyle = this.toRichTextStyle(element.style);
-            this.appendRichTextRun(
-                runs,
-                element.text,
-                richStyle,
-                currentLink,
-                hasValue(currentLink) || !!richStyle.underline
-            );
-        }
-
-        if (htmlElement?.returnToPool) {
-            htmlElement.returnToPool(elements);
-        }
-
-        return true;
-    }
-
-    private buildTextRuns(): MsdfRichTextRun[] {
-        // MsdfLabel 负责把原始文本解析成带样式的 runs，
-        // MsdfTextSprite 只接收已经解析完成的 runs 和布局约束。
-        const sourceText = this.normalizeSourceText();
-        const baseStyle = this.createBaseTextStyle();
-        const runs: MsdfRichTextRun[] = [];
-        const parsed = this.resolveParsedText(sourceText);
-
-        if (!parsed.useHtml) {
-            this.appendRichTextRun(runs, parsed.text, this.toRichTextStyle(baseStyle));
-            return runs;
-        }
-
-        if (!this.appendHtmlRuns(runs, parsed.text, baseStyle)) {
-            this.appendRichTextRun(runs, parsed.text, this.toRichTextStyle(baseStyle));
-            return runs;
-        }
-
-        return runs;
-    }
-
-    private getMaxOutlineWidth(runs?: MsdfRichTextRun[]): number {
-        let maxOutlineWidth = Math.max(this._stroke, 0);
-        const sourceRuns = runs ?? this.buildTextRuns();
-        for (const run of sourceRuns) {
-            maxOutlineWidth = Math.max(maxOutlineWidth, run.style.outlineWidth || 0);
-        }
-        return maxOutlineWidth;
-    }
-
-    private getEffectInsets(maxOutlineWidth: number = this._maxOutlineWidth): Padding {
-        const outlineExtent = Math.max(maxOutlineWidth, 0);
-        const primaryInset = Math.ceil(outlineExtent + Math.max(this._glow, 0));
-
-        if (this._shadowBlur <= 0 && this._shadowOffsetX === 0 && this._shadowOffsetY === 0) {
-            return [primaryInset, primaryInset, primaryInset, primaryInset];
-        }
-
-        const shadowBaseInset = outlineExtent + Math.ceil(this._shadowBlur);
-        return [
-            Math.max(primaryInset, Math.max(0, Math.ceil(shadowBaseInset - this._shadowOffsetY))),
-            Math.max(primaryInset, Math.max(0, Math.ceil(shadowBaseInset + this._shadowOffsetX))),
-            Math.max(primaryInset, Math.max(0, Math.ceil(shadowBaseInset + this._shadowOffsetY))),
-            Math.max(primaryInset, Math.max(0, Math.ceil(shadowBaseInset - this._shadowOffsetX))),
-        ];
-    }
-
-    private resolveTextSpriteLayout(effectInsets: Padding): MsdfLabelTextSpriteLayout {
-        const explicitContentBox = this.getContentBox({ width: this.width, height: this.height });
-        const availableWidth = this._hasExplicitWidth ? explicitContentBox.width : Number.MAX_VALUE;
-        const availableHeight = this._hasExplicitHeight ? explicitContentBox.height : 0;
-        const maxWidth =
-            this._maxWidth > 0
-                ? Math.max(
-                      this._maxWidth -
-                          this._paddingValues[1] -
-                          this._paddingValues[3] -
-                          effectInsets[1] -
-                          effectInsets[3],
-                      0
-                  )
-                : Number.MAX_VALUE;
-        const widthLimit = Math.min(availableWidth, maxWidth);
-        const hasWidthLimit = Number.isFinite(widthLimit) && widthLimit < Number.MAX_VALUE;
-        const wrapWidth =
-            (this._wordWrap || this._maxWidth > 0 || this._overflow === "ellipsis") && hasWidthLimit
-                ? widthLimit
-                : 0;
-
-        return {
-            layoutWidth: this._hasExplicitWidth ? Math.max(availableWidth, 0) : -1,
-            layoutHeight: this._hasExplicitHeight ? availableHeight : -1,
-            wrapWidth,
-        };
-    }
-
-    private applyTextSpriteLayout(
-        runs: MsdfRichTextRun[],
-        layout: MsdfLabelTextSpriteLayout
-    ): void {
-        this._textSprite.layoutWidth = layout.layoutWidth;
-        this._textSprite.layoutHeight = layout.layoutHeight;
-        this._textSprite.wordWrapWidth = layout.wrapWidth;
-        this._textSprite.letterSpacing = this._letterSpacing;
-        this._textSprite.faceDilate = this._faceDilate;
-        this._textSprite.lineSpacing = this._leading;
-        this._textSprite.defaultAlign = this._align;
-        this._textSprite.alignItems = this._alignItems;
-        this._textSprite.overflow = this._overflow;
-        this._textSprite.setGlowStyle(colorToVector4(this._glowColor), this._glow);
-        this._textSprite.setShadowStyle(
-            colorToVector4(this._shadowColor),
-            this._shadowOffsetX,
-            this._shadowOffsetY,
-            this._shadowBlur
-        );
-        this._textSprite.setRuns(runs);
-    }
-
-    private resolveValignOffset(contentBoxHeight: number): number {
-        if (this._valign === "middle") {
-            return Math.max((contentBoxHeight - this._textSprite.contentHeight) * 0.5, 0);
-        }
-
-        if (this._valign === "bottom") {
-            return Math.max(contentBoxHeight - this._textSprite.contentHeight, 0);
-        }
-
-        return 0;
-    }
-
-    private isFitContentValue(value: MsdfLabelFitContent): boolean {
-        return value === "yes" || value === "height";
-    }
-
-    private isEditingNode(): boolean {
-        return this._getBit(Laya.NodeFlags.EDITING_NODE);
-    }
-
-    private canApplyFitContentInCurrentMode(): boolean {
-        return (
-            !this.isEditingNode() ||
-            (this._textSprite.contentWidth > 0 && this._textSprite.contentHeight > 0)
-        );
-    }
-
-    private canBlockExternalWidthInCurrentMode(): boolean {
-        return !this.isEditingNode() || this._textSprite.contentWidth > 0;
-    }
-
-    private canBlockExternalHeightInCurrentMode(): boolean {
-        return !this.isEditingNode() || this._textSprite.contentHeight > 0;
-    }
-
-    private withFitContentWrite<T>(callback: () => T): T {
-        const nativeLabel = this as unknown as LayaLabelFitFlagHost;
-        const previousMsdfFitFlag = this._msdfFitFlag;
-        const hadNativeFitFlag = Object.prototype.hasOwnProperty.call(nativeLabel, "_fitFlag");
-        const previousNativeFitFlag = nativeLabel._fitFlag;
-
-        // Laya.Label.set_width/set_height 也会检查自己的 _fitFlag。
-        this._msdfFitFlag = true;
-        nativeLabel._fitFlag = true;
-        try {
-            return callback();
-        } finally {
-            this._msdfFitFlag = previousMsdfFitFlag;
-            if (hadNativeFitFlag) {
-                nativeLabel._fitFlag = previousNativeFitFlag;
-            } else {
-                delete nativeLabel._fitFlag;
-            }
-        }
-    }
-
-    private writeFitContentSize(size: MsdfLabelSize, fitContent: MsdfLabelFitContent): void {
-        this.withFitContentWrite(() => {
-            if (fitContent === "height") {
-                this.set_height(size.height);
-                return;
-            }
-
-            this.set_width(size.width);
-            this.set_height(size.height);
-        });
-    }
-
-    private applyFitContentSize(): void {
-        if (
-            this._msdfFitFlag ||
-            !this.isFitContentValue(this._fitContent) ||
-            !this.canApplyFitContentInCurrentMode()
-        ) {
-            return;
-        }
-
-        this.writeFitContentSize(this.getNativeFitContentSize(), this._fitContent);
-    }
-
-    private getViewportContentBox(layoutSize: MsdfLabelSize): MsdfLabelContentBox {
-        const contentBox = this.getContentBox(layoutSize);
-        if (this._hasExplicitHeight) {
-            return contentBox;
-        }
-
-        return {
-            ...contentBox,
-            height: this._textSprite.contentHeight,
-        };
-    }
-
-    private resolveViewportFrame(
-        layoutSize: MsdfLabelSize,
-        contentBox: MsdfLabelContentBox
-    ): MsdfLabelViewportFrame {
-        return {
-            width: layoutSize.width,
-            height: layoutSize.height,
-            drawOffsetX: contentBox.x,
-            drawOffsetY: contentBox.y + this.resolveValignOffset(contentBox.height),
-            clipRectX: 0,
-            clipRectY: 0,
-            clipRectWidth: layoutSize.width,
-            clipRectHeight: layoutSize.height,
-        };
-    }
-
-    private applyViewportFrame(frame: MsdfLabelViewportFrame): void {
-        this._textSprite.pos(0, 0);
-        this._textSprite.setViewportFrame(
-            frame.width,
-            frame.height,
-            frame.drawOffsetX,
-            frame.drawOffsetY,
-            frame.clipRectX,
-            frame.clipRectY,
-            frame.clipRectWidth,
-            frame.clipRectHeight
-        );
-    }
-
-    changeText(text?: string): void {
-        if (typeof text === "string") {
-            this.text = text;
-            return;
-        }
-
-        if (!this._font) {
-            return;
-        }
-
-        const runs = this.buildTextRuns();
-        this._maxOutlineWidth = this.getMaxOutlineWidth(runs);
-        const effectInsets = this.getEffectInsets(this._maxOutlineWidth);
-        const textSpriteLayout = this.resolveTextSpriteLayout(effectInsets);
-
-        // 真正参与排版的是 padding 内部的内容区。
-        // 描边/发光/阴影会影响测量尺寸，但不再改变文本布局原点。
-        this.applyTextSpriteLayout(runs, textSpriteLayout);
-        this._textSprite.refresh();
-        this.updateLayoutFrame();
-    }
-
-    private updateLayoutFrame(): void {
-        const effectInsets = this.getEffectInsets();
-        const measuredSize = this.getMeasuredLabelSize(effectInsets);
-        this.applyFitContentSize();
-        const layoutSize = this.getLayoutSize(measuredSize);
-        const contentBox = this.getViewportContentBox(layoutSize);
-        const viewportFrame = this.resolveViewportFrame(layoutSize, contentBox);
-
-        this.applyViewportFrame(viewportFrame);
-        this.drawBackground(layoutSize.width, layoutSize.height);
-        this.repaint();
-    }
-
-    private drawBackground(width: number, height: number): void {
-        this.graphics.clear();
-
-        if (width <= 0 || height <= 0) {
-            return;
-        }
-
-        if (!this.bgColor && !this.borderColor) {
-            return;
-        }
-
-        this.graphics.drawRect(
-            0,
-            0,
-            width,
-            height,
-            this.bgColor || null,
-            this.borderColor || null,
-            this.borderColor ? 1 : 0
-        );
     }
 }
