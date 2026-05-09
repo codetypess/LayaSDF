@@ -1499,7 +1499,6 @@ export class MsdfText extends Laya.Text {
     private _layoutWidth = NO_CONSTRAINT;
     private _layoutHeight = NO_CONSTRAINT;
     private _labelHostLayout: MsdfTextHostLayout | null = null;
-    private _maxOutlineWidth = 0;
     private _viewFrame: MsdfViewFrame = {
         width: NO_CONSTRAINT,
         height: NO_CONSTRAINT,
@@ -3155,37 +3154,11 @@ export class MsdfText extends Laya.Text {
         this._usesRuns = false;
     }
 
-    private getMaxOutlineWidth(): number {
-        let maxOutlineWidth = Math.max(this._outlineWidth, 0);
-        for (const run of this._runs) {
-            maxOutlineWidth = Math.max(maxOutlineWidth, run.style.outlineWidth || 0);
-        }
-        return maxOutlineWidth;
-    }
-
-    private getEffectInsets(maxOutlineWidth: number = this._maxOutlineWidth): Padding {
-        const outlineExtent = Math.max(maxOutlineWidth, 0);
-        const primaryInset = Math.ceil(outlineExtent + Math.max(this._glowSize, 0));
-
-        if (this._shadowBlur <= 0 && this._shadowOffsetX === 0 && this._shadowOffsetY === 0) {
-            return [primaryInset, primaryInset, primaryInset, primaryInset];
-        }
-
-        const shadowBaseInset = outlineExtent + Math.ceil(this._shadowBlur);
-        return [
-            Math.max(primaryInset, Math.max(0, Math.ceil(shadowBaseInset - this._shadowOffsetY))),
-            Math.max(primaryInset, Math.max(0, Math.ceil(shadowBaseInset + this._shadowOffsetX))),
-            Math.max(primaryInset, Math.max(0, Math.ceil(shadowBaseInset + this._shadowOffsetY))),
-            Math.max(primaryInset, Math.max(0, Math.ceil(shadowBaseInset - this._shadowOffsetX))),
-        ];
-    }
-
-    private getMeasuredSize(effectInsets: Padding): MsdfTextSize {
+    private getMeasuredSize(): MsdfTextSize {
         const padding = this.getPaddingValues();
         return {
-            width: this._contentWidth + padding[1] + padding[3] + effectInsets[1] + effectInsets[3],
-            height:
-                this._contentHeight + padding[0] + padding[2] + effectInsets[0] + effectInsets[2],
+            width: this._contentWidth + padding[1] + padding[3],
+            height: this._contentHeight + padding[0] + padding[2],
         };
     }
 
@@ -3222,7 +3195,7 @@ export class MsdfText extends Laya.Text {
         };
     }
 
-    private resolveLayoutConstraints(effectInsets: Padding): MsdfTextLayoutConstraints {
+    private resolveLayoutConstraints(): MsdfTextLayoutConstraints {
         const host = this._labelHostLayout;
         const baseWidth = host?.width ?? this.width;
         const baseHeight = host?.height ?? this.height;
@@ -3234,10 +3207,7 @@ export class MsdfText extends Laya.Text {
         const padding = this.getPaddingValues();
         const maxWidth =
             this._maxWidth > 0
-                ? Math.max(
-                      this._maxWidth - padding[1] - padding[3] - effectInsets[1] - effectInsets[3],
-                      0
-                  )
+                ? Math.max(this._maxWidth - padding[1] - padding[3], 0)
                 : Number.MAX_VALUE;
         const widthLimit = Math.min(availableWidth, maxWidth);
         const hasWidthLimit = Number.isFinite(widthLimit) && widthLimit < Number.MAX_VALUE;
@@ -3289,8 +3259,7 @@ export class MsdfText extends Laya.Text {
     }
 
     private applyAutoViewport(): void {
-        const effectInsets = this.getEffectInsets();
-        const measuredSize = this.getMeasuredSize(effectInsets);
+        const measuredSize = this.getMeasuredSize();
         const layoutSize = this.getHostLayoutSize(measuredSize);
         const contentBox = this.getViewportContentBox(layoutSize);
         const nextFrame = this.createViewFrame(
@@ -4853,10 +4822,7 @@ export class MsdfText extends Laya.Text {
             this.resetRenderState();
         } else {
             this.prepareSourceText();
-            this._maxOutlineWidth = this.getMaxOutlineWidth();
-            this.applyLayoutConstraints(
-                this.resolveLayoutConstraints(this.getEffectInsets(this._maxOutlineWidth))
-            );
+            this.applyLayoutConstraints(this.resolveLayoutConstraints());
 
             if (this._usesRuns) {
                 this.refreshRichText();

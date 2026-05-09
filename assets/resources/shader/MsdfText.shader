@@ -118,10 +118,13 @@ GLSL Start
         clip();
 
         vec2 texcoord = v_texcoordAlpha.xy;
+        float safeDistanceRange = max(u_DistanceRange, 0.0001);
         // MSDF 的 RGB 存的是距离值，取 median 后可以恢复出边缘的有符号距离。
         vec3 msdf = texture2D(u_spriteTexture, texcoord).rgb;
         float sd = median3(msdf.r, msdf.g, msdf.b);
-        float screenDistance = screenPxRange(texcoord) * (sd - 0.5);
+        float pxRange = screenPxRange(texcoord);
+        float fieldToScreenPx = pxRange / safeDistanceRange;
+        float fieldDistance = (sd - 0.5) * safeDistanceRange;
 
         vec4 fillColor = v_msdfFillColor;
         vec4 outlineColor = v_msdfOutlineColor;
@@ -137,29 +140,34 @@ GLSL Start
         float faceDilate = unpackSignedNormalizedByte(v_msdfPackedParamsA.w, PACKED_FACE_DILATE_MAX);
         vec2 shadowOffset = v_msdfPackedParamsB.xy * SHADOW_OFFSET_INV_SCALE;
 
-        // faceDilate 会统一收缩/膨胀字形轮廓：
-        // 正值更瘦，负值更肥。outline/glow/shadow 都复用同一份轮廓基准。
-        float shapeDistance = screenDistance - faceDilate;
-        float fillAlpha = clamp(shapeDistance + 0.5, 0.0, 1.0);
-        float strokeAlpha = clamp(shapeDistance + outlineWidth + 0.5, 0.0, 1.0);
+        // 这里开始统一使用“距离场单位”描述效果宽度。
+        // faceDilate / outline / glow / shadowBlur / shadowOffset 都会随字号一起缩放。
+        float shapeFieldDistance = fieldDistance - faceDilate;
+        float strokeFieldDistance = shapeFieldDistance + outlineWidth;
+        float fillAlpha = clamp(fieldToScreenPx * shapeFieldDistance + 0.5, 0.0, 1.0);
+        float strokeAlpha = clamp(fieldToScreenPx * strokeFieldDistance + 0.5, 0.0, 1.0);
         float outlineAlpha = max(strokeAlpha - fillAlpha, 0.0);
         float glowAlpha = 0.0;
         if (glowSize > 0.0 && glowColor.a > 0.0) {
-            float outsideDistance = max(-(shapeDistance + outlineWidth), 0.0);
-            glowAlpha = (1.0 - smoothstep(0.0, glowSize, outsideDistance)) * (1.0 - strokeAlpha);
+            float outsideFieldDistance = max(-strokeFieldDistance, 0.0);
+            glowAlpha = (1.0 - smoothstep(0.0, glowSize, outsideFieldDistance)) * (1.0 - strokeAlpha);
         }
 
         float shadowAlpha = 0.0;
         if (shadowColor.a > 0.0 && (shadowBlur > 0.0 || shadowOffset.x != 0.0 || shadowOffset.y != 0.0)) {
-            // 阴影会在偏移后的 texcoord 上再次采样同一份 MSDF，再单独做模糊和衰减。
-            vec2 shadowTexcoord = texcoord - (dFdx(texcoord) * shadowOffset.x - dFdy(texcoord) * shadowOffset.y);
+            vec2 shadowOffsetScreen = shadowOffset * fieldToScreenPx;
+            // 阴影偏移也改成距离场单位，再换算回当前屏幕尺度。
+            vec2 shadowTexcoord =
+                texcoord - (dFdx(texcoord) * shadowOffsetScreen.x - dFdy(texcoord) * shadowOffsetScreen.y);
             vec3 shadowMsdf = texture2D(u_spriteTexture, shadowTexcoord).rgb;
             float shadowSd = median3(shadowMsdf.r, shadowMsdf.g, shadowMsdf.b);
-            float shadowScreenDistance = screenPxRange(shadowTexcoord) * (shadowSd - 0.5);
-            float shadowShapeDistance = shadowScreenDistance - faceDilate + outlineWidth;
+            float shadowPxRange = screenPxRange(shadowTexcoord);
+            float shadowFieldToScreenPx = shadowPxRange / safeDistanceRange;
+            float shadowFieldDistance = (shadowSd - 0.5) * safeDistanceRange;
+            float shadowShapeFieldDistance = shadowFieldDistance - faceDilate + outlineWidth;
             shadowAlpha = shadowBlur > 0.0
-                ? smoothstep(-shadowBlur, shadowBlur, shadowShapeDistance)
-                : clamp(shadowShapeDistance + 0.5, 0.0, 1.0);
+                ? smoothstep(-shadowBlur, shadowBlur, shadowShapeFieldDistance)
+                : clamp(shadowFieldToScreenPx * shadowShapeFieldDistance + 0.5, 0.0, 1.0);
             shadowAlpha *= (1.0 - strokeAlpha);
         }
 
