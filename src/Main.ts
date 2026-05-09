@@ -59,16 +59,34 @@ export class Main extends Laya.Script {
 
         panel.refresh();
 
-        Laya.timer.once(2000, this, () => {
-            const label = new MsdfLabel();
-            label.width = 100;
-            label.height = 100;
-            label.wordWrap = true;
-            label.font = "demo-msdf";
-            label.fontSize = 28;
-            label.text = "测试动态修改宽度后换行是否正确 触发时机：2秒后";
-            console.log("test dynamic width change", label.textWidth, label.textHeight);
-            console.log("test dynamic width change", label.text);
+        const labdesc = this.owner.getChildByName("labdesc") as MsdfLabel;
+        console.log(
+            "labdesc before1",
+            labdesc.constructor.name,
+            labdesc.textField.textHeight,
+            labdesc.textField.textHeight
+        );
+        labdesc.text = "";
+        console.log(
+            "labdesc after1",
+            labdesc.constructor.name,
+            labdesc.textField.textWidth,
+            labdesc.textField.textHeight
+        );
+        labdesc.text = "开始行军";
+        console.log(
+            "labdesc after1",
+            labdesc.constructor.name,
+            labdesc.textField.textWidth,
+            labdesc.textField.textHeight
+        );
+        Laya.timer.once(1000, this, () => {
+            console.log(
+                "labdesc after2",
+                labdesc.constructor.name,
+                labdesc.textField.textWidth,
+                labdesc.textField.textHeight
+            );
         });
     }
 
