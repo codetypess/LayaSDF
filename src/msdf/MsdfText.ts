@@ -319,6 +319,7 @@ export type MsdfRichTextStyle = {
     outlineColor: Laya.Vector4;
     outlineColorCss: string;
     outlineWidth: number;
+    fontWeight?: number | string;
     bold?: boolean;
     italic?: boolean;
     underline?: boolean;
@@ -446,6 +447,10 @@ type MsdfTextRefreshResult = {
     layout?: MsdfLayout;
 };
 
+type LayaTextStyleWithFontWeight = Laya.TextStyle & {
+    fontWeight?: unknown;
+};
+
 const DEFAULT_TEXT_COLOR = new Laya.Vector4(1, 1, 1, 1);
 const DEFAULT_OUTLINE_COLOR = new Laya.Vector4(0, 0, 0, 1);
 const DEFAULT_GLOW_COLOR = new Laya.Vector4(1, 1, 1, 0);
@@ -457,7 +462,11 @@ const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-zA-Z]:[\\/]/;
 const DEFAULT_MSDF_SHADER_URL = "resources/shader/MsdfText.shader";
 const RES_URL_PREFIX = "res://";
 const ITALIC_SKEW_DEGREES = 12;
-// bold 只加粗笔画，不再放大几何宽度，避免影响测量、换行和容器布局。
+const FONT_WEIGHT_MIN = 100;
+const FONT_WEIGHT_NORMAL = 400;
+const FONT_WEIGHT_BOLD = 700;
+const FONT_WEIGHT_MAX = 900;
+// 700 对应旧的 bold 视觉强度；更轻或更重的字重会在这个基准上继续线性映射。
 const BOLD_FACE_DILATE = -0.5;
 const LARGE_DECORATION_SCALE_THRESHOLD = 1.75;
 const LARGE_DECORATION_THICKNESS_BOOST = 1;
@@ -708,8 +717,86 @@ function mergeBatchGroup(group: MsdfDrawBatchGroup, batch: MsdfDrawBatch): void 
     group.vertexCount += batch.vertices.length >> 1;
 }
 
-function boldFaceDilate(enabled: boolean): number {
-    return enabled ? BOLD_FACE_DILATE : 0;
+function normalizeFontWeight(value: unknown, fallback: number = FONT_WEIGHT_NORMAL): number {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return Math.max(FONT_WEIGHT_MIN, Math.min(FONT_WEIGHT_MAX, value));
+    }
+
+    if (typeof value === "string") {
+        const normalized = value.trim().toLowerCase();
+        if (!normalized) {
+            return fallback;
+        }
+
+        if (normalized === "normal") {
+            return FONT_WEIGHT_NORMAL;
+        }
+
+        if (normalized === "bold") {
+            return FONT_WEIGHT_BOLD;
+        }
+
+        if (normalized === "bolder") {
+            return 800;
+        }
+
+        if (normalized === "lighter") {
+            return 300;
+        }
+
+        const parsed = Number(normalized);
+        if (Number.isFinite(parsed)) {
+            return Math.max(FONT_WEIGHT_MIN, Math.min(FONT_WEIGHT_MAX, parsed));
+        }
+    }
+
+    return fallback;
+}
+
+function isBoldFontWeight(fontWeight: number): boolean {
+    return fontWeight >= FONT_WEIGHT_BOLD;
+}
+
+function fontWeightFaceDilate(fontWeight: number): number {
+    return (
+        ((fontWeight - FONT_WEIGHT_NORMAL) / (FONT_WEIGHT_BOLD - FONT_WEIGHT_NORMAL)) *
+        BOLD_FACE_DILATE
+    );
+}
+
+function setTextStyleFontWeight(style: Laya.TextStyle, fontWeight: number): void {
+    (style as LayaTextStyleWithFontWeight).fontWeight = fontWeight;
+}
+
+function resolveTextStyleFontWeight(
+    style: Laya.TextStyle | null | undefined,
+    fallback: number = FONT_WEIGHT_NORMAL
+): number {
+    const rawWeight = (style as LayaTextStyleWithFontWeight | null | undefined)?.fontWeight;
+    if (!isNil(rawWeight)) {
+        return normalizeFontWeight(rawWeight, fallback);
+    }
+
+    if (style?.bold) {
+        return FONT_WEIGHT_BOLD;
+    }
+
+    return fallback;
+}
+
+function resolveRichTextStyleFontWeight(
+    style: MsdfRichTextStyle,
+    fallback: number = FONT_WEIGHT_NORMAL
+): number {
+    if (!isNil(style.fontWeight)) {
+        return normalizeFontWeight(style.fontWeight, fallback);
+    }
+
+    if (style.bold) {
+        return FONT_WEIGHT_BOLD;
+    }
+
+    return fallback;
 }
 
 function styleSkewExtra(height: number, style: MsdfRichTextStyle): number {
@@ -937,7 +1024,7 @@ function sameRichStyle(left: MsdfRichTextStyle, right: MsdfRichTextStyle): boole
         (left.strikethroughColorCss ?? "") === (right.strikethroughColorCss ?? "") &&
         left.outlineColorCss === right.outlineColorCss &&
         left.outlineWidth === right.outlineWidth &&
-        !!left.bold === !!right.bold &&
+        resolveRichTextStyleFontWeight(left) === resolveRichTextStyleFontWeight(right) &&
         !!left.italic === !!right.italic &&
         !!left.underline === !!right.underline &&
         !!left.strikethrough === !!right.strikethrough &&
@@ -1474,6 +1561,7 @@ export class MsdfText extends Laya.Text {
     private _fontShaderUrl = "";
 
     private _fontSize = 16;
+    private _fontWeight = FONT_WEIGHT_NORMAL;
     private _letterSpacing = 0;
     private _lineSpacing = 0;
     private _faceDilate = 0;
@@ -1595,6 +1683,7 @@ export class MsdfText extends Laya.Text {
         super();
         this._fontSize = 16;
         this._textStyle.fontSize = this._fontSize;
+        setTextStyleFontWeight(this._textStyle, this._fontWeight);
         this._lineSpacing = 0;
         this._textStyle.leading = this._lineSpacing;
         this._defaultAlign = "left";
@@ -1822,16 +1911,26 @@ export class MsdfText extends Laya.Text {
     }
 
     override get bold(): boolean {
-        return !!this._textStyle.bold;
+        return isBoldFontWeight(this._fontWeight);
     }
 
     override set bold(value: boolean) {
-        const next = !!value;
-        if (!!this._textStyle.bold === next) {
+        this.fontWeight = value ? FONT_WEIGHT_BOLD : FONT_WEIGHT_NORMAL;
+    }
+
+    get fontWeight(): number {
+        return this._fontWeight;
+    }
+
+    set fontWeight(value: number | string) {
+        const next = normalizeFontWeight(value, this._fontWeight);
+        if (this._fontWeight === next) {
             return;
         }
 
-        this._textStyle.bold = next;
+        this._fontWeight = next;
+        this._textStyle.bold = isBoldFontWeight(next);
+        setTextStyleFontWeight(this._textStyle, next);
         this.refreshAfterPlainTextStyleChange();
     }
 
@@ -2898,6 +2997,7 @@ export class MsdfText extends Laya.Text {
         style.fontSize = this._fontSize;
         style.color = this.color;
         style.bold = this.bold;
+        setTextStyleFontWeight(style, this._fontWeight);
         style.italic = this.italic;
         style.underline = this._underline;
         style.underlineColor = this.underlineColor || "";
@@ -2918,6 +3018,7 @@ export class MsdfText extends Laya.Text {
         const underlineColorCss = style?.underlineColor || null;
         const strikethroughColorCss = style?.strikethroughColor || null;
         const outlineColorCss = this.normalizeColorCss(style?.strokeColor, this.strokeColor);
+        const fontWeight = resolveTextStyleFontWeight(style, this._fontWeight);
         const strokeValue = style?.stroke;
         const outlineWidth =
             typeof strokeValue === "number"
@@ -2939,7 +3040,8 @@ export class MsdfText extends Laya.Text {
             outlineColor: colorStringToVector4(outlineColorCss, DEFAULT_OUTLINE_COLOR),
             outlineColorCss,
             outlineWidth,
-            bold: !!style?.bold,
+            fontWeight,
+            bold: isBoldFontWeight(fontWeight),
             italic: !!style?.italic,
             underline: !!style?.underline,
             strikethrough: !!style?.strikethrough,
@@ -3503,7 +3605,7 @@ export class MsdfText extends Laya.Text {
         );
         const glowPacked = packVertexColor(this._glowColor);
         const shadowPacked = packVertexColor(this._shadowColor);
-        const faceDilate = this.getEffectiveFaceDilate(this.bold);
+        const faceDilate = this.getEffectiveFaceDilate(this._fontWeight);
         const packedParamsAValue = packParamsAValue(
             this._outlineWidth,
             this._glowSize,
@@ -5211,7 +5313,9 @@ export class MsdfText extends Laya.Text {
         vertexCount: number
     ): MsdfBatchStyleData {
         const flags = this.getEffectFlagsForStyle(style.outlineWidth, style.outlineColor);
-        const faceDilate = this.getEffectiveFaceDilate(!!style.bold);
+        const faceDilate = this.getEffectiveFaceDilate(
+            resolveRichTextStyleFontWeight(style, this._fontWeight)
+        );
 
         return {
             fillColors: createLayoutColorArray(
@@ -5330,8 +5434,8 @@ export class MsdfText extends Laya.Text {
         };
     }
 
-    private getEffectiveFaceDilate(bold: boolean): number {
-        return this._faceDilate + boldFaceDilate(bold);
+    private getEffectiveFaceDilate(fontWeight: number): number {
+        return this._faceDilate + fontWeightFaceDilate(fontWeight);
     }
 
     override _setWidth(value: number): void {

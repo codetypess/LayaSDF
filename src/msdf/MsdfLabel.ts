@@ -143,6 +143,13 @@ export class MsdfLabel extends Laya.Label {
         this._textSprite.fontSize = value;
     }
 
+    @Laya.property({
+        type: Number,
+        step: 0.1,
+        min: 0,
+        fractionDigits: 1,
+        position: "after leading",
+    })
     get letterSpacing(): number {
         return this._textSprite.letterSpacing;
     }
@@ -351,6 +358,22 @@ export class MsdfLabel extends Laya.Label {
 
     override set wordWrap(value: boolean) {
         this._textSprite.wordWrap = value;
+    }
+
+    @Laya.property({
+        type: Number,
+        step: 50,
+        min: 100,
+        max: 900,
+        fractionDigits: 0,
+        position: "after fontSize",
+    })
+    get fontWeight(): number {
+        return this._textSprite.fontWeight;
+    }
+
+    set fontWeight(value: number | string) {
+        this._textSprite.fontWeight = value;
     }
 
     override get bold(): boolean {
