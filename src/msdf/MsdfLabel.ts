@@ -2,87 +2,11 @@ import { MsdfBitmapFont, MsdfOverflow, MsdfText, MsdfTextLineMetric } from "./Ms
 
 type MsdfLabelFitContent = "no" | "yes" | "height";
 type MsdfTemplateVars = Record<string, unknown>;
-type MsdfFontResourceConfig = {
-    textureUrl: string;
-    jsonUrl: string;
-    shaderUrl: string;
-};
-type MsdfFontJsonAsset = {
-    pages?: unknown;
-    data?: unknown;
-};
 type LayaLabelFitFlagHost = {
     _fitFlag?: boolean;
 };
 
-const JSON_ASSET_PATTERN = /\.json(?:$|[?#])/i;
-const URL_SCHEME_PATTERN = /^(?:[a-z]+:)?\/\//i;
-const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-zA-Z]:[\\/]/;
-const DEFAULT_MSDF_SHADER_URL = "resources/shader/MsdfText.shader";
-const RES_URL_PREFIX = "res://";
 const DEFAULT_FONT_SIZE = 56;
-
-function normalizeFontJsonAssetData(raw: unknown): MsdfFontJsonAsset | null {
-    let data = raw;
-
-    if (data && typeof data === "object" && "data" in data) {
-        data = (data as { data: unknown }).data;
-    }
-
-    if (typeof data === "string") {
-        try {
-            data = JSON.parse(data);
-        } catch {
-            return null;
-        }
-    }
-
-    return data && typeof data === "object" ? (data as MsdfFontJsonAsset) : null;
-}
-
-function normalizeAssetUrl(value: string): string {
-    return value.replace(/\\/g, "/");
-}
-
-function isAbsoluteAssetUrl(value: string): boolean {
-    return (
-        value.startsWith(RES_URL_PREFIX) ||
-        value.startsWith("/") ||
-        WINDOWS_ABSOLUTE_PATH_PATTERN.test(value) ||
-        URL_SCHEME_PATTERN.test(value)
-    );
-}
-
-function resolveAssetUrl(baseUrl: string, relativeUrl: string): string {
-    const normalizedRelativeUrl = normalizeAssetUrl(relativeUrl.trim());
-    if (!normalizedRelativeUrl) {
-        return "";
-    }
-
-    if (isAbsoluteAssetUrl(normalizedRelativeUrl)) {
-        return normalizedRelativeUrl;
-    }
-
-    const baseSegments = normalizeAssetUrl(baseUrl).split("/");
-    baseSegments.pop();
-
-    for (const segment of normalizedRelativeUrl.split("/")) {
-        if (!segment || segment === ".") {
-            continue;
-        }
-
-        if (segment === "..") {
-            if (baseSegments.length > 0) {
-                baseSegments.pop();
-            }
-            continue;
-        }
-
-        baseSegments.push(segment);
-    }
-
-    return baseSegments.join("/");
-}
 
 function isNil(value: unknown): value is null | undefined {
     return value === null || value === undefined;
@@ -98,18 +22,7 @@ function colorToVector4(value: string, fallback: string = "#ffffff"): Laya.Vecto
     menu: "自定义",
 })
 export class MsdfLabel extends Laya.Label {
-    private static readonly fontCache = new Map<string, Promise<MsdfBitmapFont>>();
-    private static readonly loadedFontCache = new Map<string, MsdfBitmapFont>();
-    private static readonly registeredFonts = new Map<string, MsdfFontResourceConfig>();
-
     private _textSprite!: MsdfText;
-    private _font: MsdfBitmapFont | null = null;
-    private _resourceKey = "";
-    private _fontResolveToken = 0;
-    private _fontName = "";
-    private _fontTextureUrl = "";
-    private _fontJsonUrl = "";
-    private _fontShaderUrl = "";
     private _hasExplicitWidth = false;
     private _hasExplicitHeight = false;
     private _msdfFitFlag = false;
@@ -152,6 +65,8 @@ export class MsdfLabel extends Laya.Label {
         textSprite._onPostLayout = () => this.handleTextPostLayout();
         textSprite.off(Laya.Event.CHANGE, this, this.handleTextFieldChange);
         textSprite.on(Laya.Event.CHANGE, this, this.handleTextFieldChange);
+        textSprite.off(Laya.Event.LOADED, this, this.handleTextFieldLoaded);
+        textSprite.on(Laya.Event.LOADED, this, this.handleTextFieldLoaded);
         this._tf = textSprite;
         this._tf.hideFlags = Laya.HideFlags.HideAndDontSave;
     }
@@ -162,6 +77,10 @@ export class MsdfLabel extends Laya.Label {
             this.onCompResize();
         }
         this.syncTextHostLayout();
+    }
+
+    private handleTextFieldLoaded(): void {
+        this.event(Laya.Event.LOADED);
     }
 
     private pruneLegacySerializedChildren(): void {
@@ -192,24 +111,7 @@ export class MsdfLabel extends Laya.Label {
         jsonUrl: string,
         shaderUrl: string
     ): Promise<MsdfBitmapFont> {
-        const key = MsdfLabel.getFontResourceKey(textureUrl, jsonUrl, shaderUrl);
-        const loadedFont = MsdfLabel.loadedFontCache.get(key);
-        if (loadedFont) {
-            return Promise.resolve(loadedFont);
-        }
-
-        let task = MsdfLabel.fontCache.get(key);
-        if (!task) {
-            task = (async () => {
-                await Laya.loader.load(shaderUrl);
-                const font = await MsdfBitmapFont.load(textureUrl, jsonUrl);
-                MsdfLabel.loadedFontCache.set(key, font);
-                return font;
-            })();
-            MsdfLabel.fontCache.set(key, task);
-        }
-
-        return task;
+        return MsdfText.preload(textureUrl, jsonUrl, shaderUrl);
     }
 
     static registerFont(
@@ -218,27 +120,11 @@ export class MsdfLabel extends Laya.Label {
         jsonUrl: string,
         shaderUrl: string
     ): void {
-        if (!name || !textureUrl || !jsonUrl || !shaderUrl) {
-            return;
-        }
-
-        MsdfLabel.registeredFonts.set(name, { textureUrl, jsonUrl, shaderUrl });
+        MsdfText.registerFont(name, textureUrl, jsonUrl, shaderUrl);
     }
 
     static unregisterFont(name: string): void {
-        if (!name) {
-            return;
-        }
-
-        MsdfLabel.registeredFonts.delete(name);
-    }
-
-    private static getFontResourceKey(
-        textureUrl: string,
-        jsonUrl: string,
-        shaderUrl: string
-    ): string {
-        return `${shaderUrl}|${textureUrl}|${jsonUrl}`;
+        MsdfText.unregisterFont(name);
     }
 
     override get text(): string {
@@ -541,36 +427,11 @@ export class MsdfLabel extends Laya.Label {
         tips: "选择 MSDF 字体 json。编辑器会序列化为 res://uuid，脚本里仍然支持注册名和 texture|json|shader。",
     })
     override get font(): string {
-        return this._fontName;
+        return this._textSprite.font;
     }
 
     override set font(value: string) {
-        this.cancelPendingFontResolution();
-
-        if (this._fontName === value) {
-            return;
-        }
-
-        this._fontName = value || "";
-        if (!this._fontName) {
-            this.setFontResourceUrls("", "", "");
-            return;
-        }
-
-        const resources = this.resolveFontResources(this._fontName);
-        if (!resources) {
-            if (this.isFontJsonReference(this._fontName)) {
-                this.resolveFontJsonReference(this._fontName, this._fontResolveToken);
-                return;
-            }
-
-            console.warn(
-                `[MsdfLabel] unresolved font "${this._fontName}". Use MsdfLabel.registerFont(name, textureUrl, jsonUrl, shaderUrl), pass "texture|json|shader", or assign an MSDF json path.`
-            );
-            return;
-        }
-
-        this.applyFontResources(resources);
+        this._textSprite.font = value;
     }
 
     override get maxWidth(): number {
@@ -685,46 +546,27 @@ export class MsdfLabel extends Laya.Label {
     }
 
     get fontTextureUrl(): string {
-        return this._fontTextureUrl;
+        return this._textSprite.fontTextureUrl;
     }
 
     set fontTextureUrl(value: string) {
-        this.cancelPendingFontResolution();
-        this.setFontResourceUrls(value || "", this._fontJsonUrl, this._fontShaderUrl);
+        this._textSprite.fontTextureUrl = value;
     }
 
     get fontJsonUrl(): string {
-        return this._fontJsonUrl;
+        return this._textSprite.fontJsonUrl;
     }
 
     set fontJsonUrl(value: string) {
-        const nextValue = value || "";
-
-        this.cancelPendingFontResolution();
-        if (!nextValue) {
-            this.setFontResourceUrls(this._fontTextureUrl, "", this._fontShaderUrl);
-            return;
-        }
-
-        if (this._fontTextureUrl) {
-            this.setFontResourceUrls(
-                this._fontTextureUrl,
-                nextValue,
-                this.resolveMsdfShaderUrl(this._fontShaderUrl)
-            );
-            return;
-        }
-
-        this.resolveFontJsonReference(nextValue, this._fontResolveToken, false);
+        this._textSprite.fontJsonUrl = value;
     }
 
     get fontShaderUrl(): string {
-        return this._fontShaderUrl;
+        return this._textSprite.fontShaderUrl;
     }
 
     set fontShaderUrl(value: string) {
-        this.cancelPendingFontResolution();
-        this.setFontResourceUrls(this._fontTextureUrl, this._fontJsonUrl, value || "");
+        this._textSprite.fontShaderUrl = value;
     }
 
     protected override measureWidth(): number {
@@ -886,183 +728,5 @@ export class MsdfLabel extends Laya.Label {
             this.set_width(size.width);
             this.set_height(size.height);
         });
-    }
-
-    private resolveFontResources(value: string): MsdfFontResourceConfig | null {
-        if (!value) {
-            return null;
-        }
-
-        const registered = MsdfLabel.registeredFonts.get(value);
-        if (registered) {
-            return registered;
-        }
-
-        const parts = value
-            .split("|")
-            .map((item) => item.trim())
-            .filter(Boolean);
-        if (parts.length === 3) {
-            return {
-                textureUrl: parts[0],
-                jsonUrl: parts[1],
-                shaderUrl: parts[2],
-            };
-        }
-
-        return null;
-    }
-
-    private isFontJsonReference(value: string): boolean {
-        return value.startsWith(RES_URL_PREFIX) || JSON_ASSET_PATTERN.test(value);
-    }
-
-    private cancelPendingFontResolution(): void {
-        this._fontResolveToken += 1;
-    }
-
-    private resolveMsdfShaderUrl(shaderUrl: string | null | undefined): string {
-        return shaderUrl || DEFAULT_MSDF_SHADER_URL;
-    }
-
-    private resolveFontJsonReference(
-        jsonUrl: string,
-        requestToken: number,
-        syncFontName: boolean = true
-    ): void {
-        const resolvedJsonUrl = normalizeAssetUrl(jsonUrl);
-        const resolvedShaderUrl = this.resolveMsdfShaderUrl(this._fontShaderUrl);
-
-        void Promise.all([
-            Laya.loader.load({ url: resolvedJsonUrl, type: Laya.Loader.JSON }),
-            Laya.AssetDb.inst.resolveURL(resolvedJsonUrl),
-        ])
-            .then(([rawData, resolvedAssetUrl]) => {
-                if (this.destroyed || requestToken !== this._fontResolveToken) {
-                    return;
-                }
-
-                const resources = this.resolveFontResourcesFromJsonAsset(
-                    resolvedJsonUrl,
-                    rawData,
-                    resolvedShaderUrl,
-                    normalizeAssetUrl(resolvedAssetUrl || resolvedJsonUrl)
-                );
-                if (!resources) {
-                    console.warn(
-                        `[MsdfLabel] invalid MSDF font json "${resolvedJsonUrl}". Expected pages[0] to point to the atlas image.`
-                    );
-                    return;
-                }
-
-                if (syncFontName) {
-                    this._fontName = resolvedJsonUrl;
-                }
-                this.applyFontResources(resources);
-            })
-            .catch((error) => {
-                if (this.destroyed || requestToken !== this._fontResolveToken) {
-                    return;
-                }
-
-                console.error(
-                    `[MsdfLabel] failed to resolve font json "${resolvedJsonUrl}"`,
-                    error
-                );
-            });
-    }
-
-    private resolveFontResourcesFromJsonAsset(
-        jsonUrl: string,
-        rawData: unknown,
-        shaderUrl: string,
-        resourceBaseUrl: string = jsonUrl
-    ): MsdfFontResourceConfig | null {
-        const fontData = normalizeFontJsonAssetData(rawData);
-        const pages = Array.isArray(fontData?.pages) ? fontData.pages : null;
-        const page = typeof pages?.[0] === "string" ? pages[0] : "";
-        if (!page) {
-            return null;
-        }
-
-        return {
-            textureUrl: resolveAssetUrl(resourceBaseUrl, page),
-            jsonUrl,
-            shaderUrl,
-        };
-    }
-
-    private applyFontResources(resources: MsdfFontResourceConfig): void {
-        this.setFontResourceUrls(resources.textureUrl, resources.jsonUrl, resources.shaderUrl);
-    }
-
-    private setFontResourceUrls(textureUrl: string, jsonUrl: string, shaderUrl: string): void {
-        if (
-            this._fontTextureUrl === textureUrl &&
-            this._fontJsonUrl === jsonUrl &&
-            this._fontShaderUrl === shaderUrl
-        ) {
-            return;
-        }
-
-        this._fontTextureUrl = textureUrl;
-        this._fontJsonUrl = jsonUrl;
-        this._fontShaderUrl = shaderUrl;
-        this.reloadFont();
-    }
-
-    private hasCompleteFontResources(): boolean {
-        return !!this._fontTextureUrl && !!this._fontJsonUrl && !!this._fontShaderUrl;
-    }
-
-    private clearTextSprite(): void {
-        this._textSprite.clearFont();
-        this._textSprite.size(0, 0);
-    }
-
-    private clearFontState(): void {
-        this._resourceKey = "";
-        this._font = null;
-    }
-
-    private applyLoadedFont(font: MsdfBitmapFont): void {
-        this._font = font;
-        this._textSprite.resetFont(font);
-        this.syncTextHostLayout();
-        this.event(Laya.Event.LOADED);
-    }
-
-    private reloadFont(): void {
-        if (!this.hasCompleteFontResources()) {
-            this.clearFontState();
-            this.clearTextSprite();
-            return;
-        }
-
-        const nextKey = MsdfLabel.getFontResourceKey(
-            this._fontTextureUrl,
-            this._fontJsonUrl,
-            this._fontShaderUrl
-        );
-        this._resourceKey = nextKey;
-        this._font = null;
-
-        const loadedFont = MsdfLabel.loadedFontCache.get(nextKey);
-        if (loadedFont) {
-            this.applyLoadedFont(loadedFont);
-            return;
-        }
-
-        MsdfLabel.preload(this._fontTextureUrl, this._fontJsonUrl, this._fontShaderUrl)
-            .then((font) => {
-                if (this.destroyed || this._resourceKey !== nextKey) {
-                    return;
-                }
-
-                this.applyLoadedFont(font);
-            })
-            .catch((error) => {
-                console.error("[MsdfLabel] failed to load font resources", error);
-            });
     }
 }

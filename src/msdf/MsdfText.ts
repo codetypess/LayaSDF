@@ -156,6 +156,22 @@ type MsdfDecorationRenderMetrics = {
     thickness: number;
 };
 
+type MsdfFontResourceConfig = {
+    textureUrl: string;
+    jsonUrl: string;
+    shaderUrl: string;
+};
+
+type MsdfLoadedFontReference = {
+    font: MsdfBitmapFont;
+    resources: MsdfFontResourceConfig;
+};
+
+type MsdfFontJsonAsset = {
+    pages?: unknown;
+    data?: unknown;
+};
+
 class MsdfMaterialDrawTrianglesCmd implements Laya.IGraphicCMD {
     static readonly ID = "DrawTrianglesMSDF";
 
@@ -435,6 +451,11 @@ const DEFAULT_OUTLINE_COLOR = new Laya.Vector4(0, 0, 0, 1);
 const DEFAULT_GLOW_COLOR = new Laya.Vector4(1, 1, 1, 0);
 const NO_CONSTRAINT = -1;
 const DEFAULT_SHADOW_COLOR = new Laya.Vector4(0, 0, 0, 0);
+const JSON_ASSET_PATTERN = /\.json(?:$|[?#])/i;
+const URL_SCHEME_PATTERN = /^(?:[a-z]+:)?\/\//i;
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-zA-Z]:[\\/]/;
+const DEFAULT_MSDF_SHADER_URL = "resources/shader/MsdfText.shader";
+const RES_URL_PREFIX = "res://";
 const ITALIC_SKEW_DEGREES = 12;
 const BOLD_SCALE_X = 1.04;
 const LARGE_DECORATION_SCALE_THRESHOLD = 1.75;
@@ -499,6 +520,68 @@ function createEmptyPlainTextBatchCache(): MsdfPlainTextBatchCache {
         packedParamsA: null,
         packedParamsB: null,
     };
+}
+
+function normalizeFontJsonAssetData(raw: unknown): MsdfFontJsonAsset | null {
+    let data = raw;
+
+    if (data && typeof data === "object" && "data" in data) {
+        data = (data as { data: unknown }).data;
+    }
+
+    if (typeof data === "string") {
+        try {
+            data = JSON.parse(data);
+        } catch {
+            return null;
+        }
+    }
+
+    return data && typeof data === "object" ? (data as MsdfFontJsonAsset) : null;
+}
+
+function normalizeAssetUrl(value: string): string {
+    return value.replace(/\\/g, "/");
+}
+
+function isAbsoluteAssetUrl(value: string): boolean {
+    return (
+        value.startsWith(RES_URL_PREFIX) ||
+        value.startsWith("/") ||
+        WINDOWS_ABSOLUTE_PATH_PATTERN.test(value) ||
+        URL_SCHEME_PATTERN.test(value)
+    );
+}
+
+function resolveAssetUrl(baseUrl: string, relativeUrl: string): string {
+    const normalizedRelativeUrl = normalizeAssetUrl(relativeUrl.trim());
+    if (!normalizedRelativeUrl) {
+        return "";
+    }
+
+    if (isAbsoluteAssetUrl(normalizedRelativeUrl)) {
+        return normalizedRelativeUrl;
+    }
+
+    const baseSegments = normalizeAssetUrl(baseUrl).split("/");
+    baseSegments.pop();
+
+    for (const segment of normalizedRelativeUrl.split("/")) {
+        if (!segment || segment === ".") {
+            continue;
+        }
+
+        if (segment === "..") {
+            if (baseSegments.length > 0) {
+                baseSegments.pop();
+            }
+            continue;
+        }
+
+        baseSegments.push(segment);
+    }
+
+    return baseSegments.join("/");
 }
 
 function createBatchGroup(batch: MsdfDrawBatch): MsdfDrawBatchGroup {
@@ -1373,8 +1456,21 @@ export class MsdfBitmapFont {
 }
 
 export class MsdfText extends Laya.Text {
+    private static readonly fontCache = new Map<string, Promise<MsdfBitmapFont>>();
+    private static readonly loadedFontCache = new Map<string, MsdfBitmapFont>();
+    private static readonly registeredFonts = new Map<string, MsdfFontResourceConfig>();
+    private static readonly resolvedFontJsonCache = new Map<string, MsdfFontResourceConfig>();
+    private static readonly loadedFontReferenceCache = new Map<string, MsdfLoadedFontReference>();
+
+    private _initialized = false;
     private _msdfFont: MsdfBitmapFont | null = null;
     private materialInstance: Laya.Material;
+    private _resourceKey = "";
+    private _fontResolveToken = 0;
+    private _fontName = "";
+    private _fontTextureUrl = "";
+    private _fontJsonUrl = "";
+    private _fontShaderUrl = "";
 
     private _fontSize = 16;
     private _letterSpacing = 0;
@@ -1433,6 +1529,68 @@ export class MsdfText extends Laya.Text {
         contains: (x: number, y: number): boolean => this.hitRichTextClickArea(x, y) !== null,
     };
 
+    static preload(
+        textureUrl: string,
+        jsonUrl: string,
+        shaderUrl: string
+    ): Promise<MsdfBitmapFont> {
+        const key = MsdfText.getFontResourceKey(textureUrl, jsonUrl, shaderUrl);
+        const loadedFont = MsdfText.loadedFontCache.get(key);
+        if (loadedFont) {
+            return Promise.resolve(loadedFont);
+        }
+
+        let task = MsdfText.fontCache.get(key);
+        if (!task) {
+            task = (async () => {
+                await Laya.loader.load(shaderUrl);
+                const font = await MsdfBitmapFont.load(textureUrl, jsonUrl);
+                MsdfText.loadedFontCache.set(key, font);
+                return font;
+            })();
+            MsdfText.fontCache.set(key, task);
+        }
+
+        return task;
+    }
+
+    static registerFont(
+        name: string,
+        textureUrl: string,
+        jsonUrl: string,
+        shaderUrl: string
+    ): void {
+        if (!name || !textureUrl || !jsonUrl || !shaderUrl) {
+            return;
+        }
+
+        MsdfText.registeredFonts.set(name, { textureUrl, jsonUrl, shaderUrl });
+    }
+
+    static unregisterFont(name: string): void {
+        if (!name) {
+            return;
+        }
+
+        MsdfText.registeredFonts.delete(name);
+    }
+
+    private static getFontResourceKey(
+        textureUrl: string,
+        jsonUrl: string,
+        shaderUrl: string
+    ): string {
+        return `${shaderUrl}|${textureUrl}|${jsonUrl}`;
+    }
+
+    private static getFontJsonCacheKey(jsonUrl: string, shaderUrl: string): string {
+        return `${shaderUrl}|${normalizeAssetUrl(jsonUrl)}`;
+    }
+
+    private static getLoadedFontReferenceKey(reference: string, shaderUrl: string): string {
+        return `${shaderUrl}|${normalizeAssetUrl(reference)}`;
+    }
+
     constructor() {
         super();
         this._fontSize = 16;
@@ -1451,6 +1609,7 @@ export class MsdfText extends Laya.Text {
         this.mouseThrough = true;
         this._richTextClickSavedHitArea = this.hitArea;
 
+        this._initialized = true;
         this.syncMaterial();
         this.refresh();
     }
@@ -1490,6 +1649,61 @@ export class MsdfText extends Laya.Text {
 
     override changeText(text: string): void {
         this.text = text;
+    }
+
+    override get font(): string {
+        return this._fontName;
+    }
+
+    override set font(value: string) {
+        const next = value || "";
+        if (!this.isInitialized()) {
+            this._fontName = next;
+            return;
+        }
+
+        if (this._fontName === next) {
+            return;
+        }
+
+        this.cancelPendingFontResolution();
+        this._fontName = next;
+        if (!this._fontName) {
+            this.setFontResourceUrls("", "", "");
+            return;
+        }
+
+        if (this.applyLoadedFontReference(this._fontName)) {
+            return;
+        }
+
+        const resources = this.resolveFontResources(this._fontName);
+        if (!resources) {
+            if (this.isFontJsonReference(this._fontName)) {
+                if (this.applyCachedFontJsonReference(this._fontName, true)) {
+                    return;
+                }
+                this.resolveFontJsonReference(this._fontName, this._fontResolveToken);
+                return;
+            }
+
+            console.warn(
+                `[MsdfText] unresolved font "${this._fontName}". Use MsdfText.registerFont(name, textureUrl, jsonUrl, shaderUrl), pass "texture|json|shader", or assign an MSDF json path.`
+            );
+            return;
+        }
+
+        this.applyFontResources(resources);
+    }
+
+    override get textWidth(): number {
+        this.ensureFontReadySync();
+        return super.textWidth;
+    }
+
+    override get textHeight(): number {
+        this.ensureFontReadySync();
+        return super.textHeight;
     }
 
     override get fontSize(): number {
@@ -1908,16 +2122,19 @@ export class MsdfText extends Laya.Text {
     }
 
     get contentWidth(): number {
+        this.ensureFontReadySync();
         this.typeset();
         return this._contentWidth;
     }
 
     get contentHeight(): number {
+        this.ensureFontReadySync();
         this.typeset();
         return this._contentHeight;
     }
 
     override get lines(): ReadonlyArray<MsdfTextLineMetric> {
+        this.ensureFontReadySync();
         this.typeset();
         return this._lines as unknown as ReadonlyArray<MsdfTextLineMetric>;
     }
@@ -1960,6 +2177,63 @@ export class MsdfText extends Laya.Text {
     override get maxScrollY(): number {
         const viewportHeight = this._layoutHeight >= 0 ? this._layoutHeight : this.height;
         return Math.max(this._contentHeight - viewportHeight, 0);
+    }
+
+    get fontTextureUrl(): string {
+        return this._fontTextureUrl;
+    }
+
+    set fontTextureUrl(value: string) {
+        if (!this.isInitialized()) {
+            this._fontTextureUrl = value || "";
+            return;
+        }
+
+        this.cancelPendingFontResolution();
+        this.setFontResourceUrls(value || "", this._fontJsonUrl, this._fontShaderUrl);
+    }
+
+    get fontJsonUrl(): string {
+        return this._fontJsonUrl;
+    }
+
+    set fontJsonUrl(value: string) {
+        const nextValue = value || "";
+        if (!this.isInitialized()) {
+            this._fontJsonUrl = nextValue;
+            return;
+        }
+
+        this.cancelPendingFontResolution();
+        if (!nextValue) {
+            this.setFontResourceUrls(this._fontTextureUrl, "", this._fontShaderUrl);
+            return;
+        }
+
+        if (this._fontTextureUrl) {
+            this.setFontResourceUrls(
+                this._fontTextureUrl,
+                nextValue,
+                this.resolveMsdfShaderUrl(this._fontShaderUrl)
+            );
+            return;
+        }
+
+        this.resolveFontJsonReference(nextValue, this._fontResolveToken, false);
+    }
+
+    get fontShaderUrl(): string {
+        return this._fontShaderUrl;
+    }
+
+    set fontShaderUrl(value: string) {
+        if (!this.isInitialized()) {
+            this._fontShaderUrl = value || "";
+            return;
+        }
+
+        this.cancelPendingFontResolution();
+        this.setFontResourceUrls(this._fontTextureUrl, this._fontJsonUrl, value || "");
     }
 
     set textColor(value: Laya.Vector4) {
@@ -2151,8 +2425,427 @@ export class MsdfText extends Laya.Text {
     }
 
     getFitContentSize(): MsdfTextSize {
+        this.ensureFontReadySync();
         this.typeset();
         return this.getNativeFitContentSize();
+    }
+
+    private isInitialized(): boolean {
+        return this._initialized === true;
+    }
+
+    private resolveFontResources(value: string): MsdfFontResourceConfig | null {
+        if (!value) {
+            return null;
+        }
+
+        const registered = MsdfText.registeredFonts.get(value);
+        if (registered) {
+            return registered;
+        }
+
+        const parts = value
+            .split("|")
+            .map((item) => item.trim())
+            .filter(Boolean);
+        if (parts.length === 3) {
+            return {
+                textureUrl: parts[0],
+                jsonUrl: parts[1],
+                shaderUrl: parts[2],
+            };
+        }
+
+        return null;
+    }
+
+    private isFontJsonReference(value: string): boolean {
+        return value.startsWith(RES_URL_PREFIX) || JSON_ASSET_PATTERN.test(value);
+    }
+
+    private cancelPendingFontResolution(): void {
+        this._fontResolveToken = (this._fontResolveToken || 0) + 1;
+    }
+
+    private resolveMsdfShaderUrl(shaderUrl: string | null | undefined): string {
+        return shaderUrl || DEFAULT_MSDF_SHADER_URL;
+    }
+
+    private ensureFontReadySync(): void {
+        if (!this.isInitialized()) {
+            return;
+        }
+
+        if (this._msdfFont || !this._fontName) {
+            return;
+        }
+
+        if (this.applyLoadedFontReference(this._fontName)) {
+            return;
+        }
+
+        if (this.isFontJsonReference(this._fontName)) {
+            this.applyCachedFontJsonReference(this._fontName, true);
+        }
+    }
+
+    private getResolvedAssetUrlSync(url: string): string {
+        const normalizedUrl = normalizeAssetUrl(url);
+        if (!normalizedUrl.startsWith(RES_URL_PREFIX)) {
+            return normalizedUrl;
+        }
+
+        const uuid = normalizedUrl.substring(RES_URL_PREFIX.length);
+        return normalizeAssetUrl(Laya.AssetDb.inst.UUID_to_URL(uuid) || normalizedUrl);
+    }
+
+    private getLoadedFontJsonAsset(jsonUrl: string, resolvedAssetUrl: string): unknown {
+        return (
+            Laya.loader.getRes(jsonUrl, Laya.Loader.JSON) ??
+            (resolvedAssetUrl !== jsonUrl
+                ? Laya.loader.getRes(resolvedAssetUrl, Laya.Loader.JSON)
+                : null)
+        );
+    }
+
+    private getLoadedTextureAsset(textureUrl: string): Laya.Texture | null {
+        return (
+            (Laya.loader.getRes(textureUrl, Laya.Loader.IMAGE) as Laya.Texture | null) ??
+            (Laya.loader.getRes(textureUrl) as Laya.Texture | null)
+        );
+    }
+
+    private createFontFromCachedResources(
+        resources: MsdfFontResourceConfig
+    ): MsdfBitmapFont | null {
+        const texture = this.getLoadedTextureAsset(resources.textureUrl);
+        if (!texture) {
+            return null;
+        }
+
+        const resolvedJsonUrl = this.getResolvedAssetUrlSync(resources.jsonUrl);
+        const rawData = this.getLoadedFontJsonAsset(resources.jsonUrl, resolvedJsonUrl);
+        if (!rawData) {
+            return null;
+        }
+
+        return MsdfBitmapFont.fromResources(texture, rawData);
+    }
+
+    private cacheResolvedFontJsonResources(
+        jsonUrl: string,
+        shaderUrl: string,
+        resources: MsdfFontResourceConfig
+    ): void {
+        MsdfText.resolvedFontJsonCache.set(
+            MsdfText.getFontJsonCacheKey(jsonUrl, shaderUrl),
+            resources
+        );
+    }
+
+    private aliasLoadedFontResource(resources: MsdfFontResourceConfig, jsonUrlAlias: string): void {
+        const normalizedAlias = normalizeAssetUrl(jsonUrlAlias);
+        const normalizedJsonUrl = normalizeAssetUrl(resources.jsonUrl);
+        if (!normalizedAlias || normalizedAlias === normalizedJsonUrl) {
+            return;
+        }
+
+        const aliasKey = MsdfText.getFontResourceKey(
+            resources.textureUrl,
+            normalizedAlias,
+            resources.shaderUrl
+        );
+        const currentKey = MsdfText.getFontResourceKey(
+            resources.textureUrl,
+            normalizedJsonUrl,
+            resources.shaderUrl
+        );
+        const loadedFont = MsdfText.loadedFontCache.get(aliasKey);
+        if (loadedFont) {
+            MsdfText.loadedFontCache.set(currentKey, loadedFont);
+            return;
+        }
+
+        const loadingTask = MsdfText.fontCache.get(aliasKey);
+        if (loadingTask) {
+            MsdfText.fontCache.set(currentKey, loadingTask);
+        }
+    }
+
+    private cacheLoadedFontReference(
+        reference: string,
+        shaderUrl: string,
+        font: MsdfBitmapFont,
+        resources: MsdfFontResourceConfig
+    ): void {
+        if (!reference) {
+            return;
+        }
+
+        MsdfText.loadedFontReferenceCache.set(
+            MsdfText.getLoadedFontReferenceKey(reference, shaderUrl),
+            { font, resources }
+        );
+    }
+
+    private cacheLoadedFontReferences(
+        font: MsdfBitmapFont,
+        resources: MsdfFontResourceConfig
+    ): void {
+        const shaderUrl = this.resolveMsdfShaderUrl(resources.shaderUrl);
+        this.cacheLoadedFontReference(this._fontName, shaderUrl, font, resources);
+        this.cacheLoadedFontReference(resources.jsonUrl, shaderUrl, font, resources);
+        this.cacheLoadedFontReference(
+            this.getResolvedAssetUrlSync(resources.jsonUrl),
+            shaderUrl,
+            font,
+            resources
+        );
+    }
+
+    private applyLoadedFontReference(reference: string): boolean {
+        const resolvedShaderUrl = this.resolveMsdfShaderUrl(this._fontShaderUrl);
+        const loaded = MsdfText.loadedFontReferenceCache.get(
+            MsdfText.getLoadedFontReferenceKey(reference, resolvedShaderUrl)
+        );
+        if (!loaded) {
+            return false;
+        }
+
+        this.applyLoadedFontResources(loaded.resources, loaded.font);
+        return true;
+    }
+
+    private getCachedFontJsonResources(
+        jsonUrl: string,
+        shaderUrl: string
+    ): MsdfFontResourceConfig | null {
+        const normalizedJsonUrl = normalizeAssetUrl(jsonUrl);
+        const cached = MsdfText.resolvedFontJsonCache.get(
+            MsdfText.getFontJsonCacheKey(normalizedJsonUrl, shaderUrl)
+        );
+        if (cached) {
+            return cached;
+        }
+
+        const resolvedAssetUrl = this.getResolvedAssetUrlSync(normalizedJsonUrl);
+        const rawData = this.getLoadedFontJsonAsset(normalizedJsonUrl, resolvedAssetUrl);
+        if (!rawData) {
+            return null;
+        }
+
+        const resources = this.resolveFontResourcesFromJsonAsset(
+            normalizedJsonUrl,
+            rawData,
+            shaderUrl,
+            resolvedAssetUrl
+        );
+        if (!resources) {
+            return null;
+        }
+
+        this.aliasLoadedFontResource(resources, resolvedAssetUrl);
+        this.cacheResolvedFontJsonResources(normalizedJsonUrl, shaderUrl, resources);
+        return resources;
+    }
+
+    private applyCachedFontJsonReference(jsonUrl: string, syncFontName: boolean): boolean {
+        const normalizedJsonUrl = normalizeAssetUrl(jsonUrl);
+        const resolvedShaderUrl = this.resolveMsdfShaderUrl(this._fontShaderUrl);
+        const resources = this.getCachedFontJsonResources(normalizedJsonUrl, resolvedShaderUrl);
+        if (!resources) {
+            return false;
+        }
+
+        if (syncFontName) {
+            this._fontName = normalizedJsonUrl;
+        }
+        this.applyFontResources(resources);
+        return true;
+    }
+
+    private resolveFontJsonReference(
+        jsonUrl: string,
+        requestToken: number,
+        syncFontName: boolean = true
+    ): void {
+        const resolvedJsonUrl = normalizeAssetUrl(jsonUrl);
+        const resolvedShaderUrl = this.resolveMsdfShaderUrl(this._fontShaderUrl);
+
+        if (this.applyCachedFontJsonReference(resolvedJsonUrl, syncFontName)) {
+            return;
+        }
+
+        void Promise.all([
+            Laya.loader.load({ url: resolvedJsonUrl, type: Laya.Loader.JSON }),
+            Laya.AssetDb.inst.resolveURL(resolvedJsonUrl),
+        ])
+            .then(([rawData, resolvedAssetUrl]) => {
+                if (this.destroyed || requestToken !== this._fontResolveToken) {
+                    return;
+                }
+
+                const resources = this.resolveFontResourcesFromJsonAsset(
+                    resolvedJsonUrl,
+                    rawData,
+                    resolvedShaderUrl,
+                    normalizeAssetUrl(resolvedAssetUrl || resolvedJsonUrl)
+                );
+                if (!resources) {
+                    console.warn(
+                        `[MsdfText] invalid MSDF font json "${resolvedJsonUrl}". Expected pages[0] to point to the atlas image.`
+                    );
+                    return;
+                }
+
+                if (syncFontName) {
+                    this._fontName = resolvedJsonUrl;
+                }
+                this.aliasLoadedFontResource(resources, normalizeAssetUrl(resolvedAssetUrl));
+                this.cacheResolvedFontJsonResources(resolvedJsonUrl, resolvedShaderUrl, resources);
+                this.applyFontResources(resources);
+            })
+            .catch((error) => {
+                if (this.destroyed || requestToken !== this._fontResolveToken) {
+                    return;
+                }
+
+                console.error(`[MsdfText] failed to resolve font json "${resolvedJsonUrl}"`, error);
+            });
+    }
+
+    private resolveFontResourcesFromJsonAsset(
+        jsonUrl: string,
+        rawData: unknown,
+        shaderUrl: string,
+        resourceBaseUrl: string = jsonUrl
+    ): MsdfFontResourceConfig | null {
+        const fontData = normalizeFontJsonAssetData(rawData);
+        const pages = Array.isArray(fontData?.pages) ? fontData.pages : null;
+        const page = typeof pages?.[0] === "string" ? pages[0] : "";
+        if (!page) {
+            return null;
+        }
+
+        return {
+            textureUrl: resolveAssetUrl(resourceBaseUrl, page),
+            jsonUrl,
+            shaderUrl,
+        };
+    }
+
+    private applyFontResources(resources: MsdfFontResourceConfig): void {
+        this.setFontResourceUrls(resources.textureUrl, resources.jsonUrl, resources.shaderUrl);
+    }
+
+    private applyLoadedFontResources(
+        resources: MsdfFontResourceConfig,
+        font: MsdfBitmapFont
+    ): void {
+        this._fontTextureUrl = resources.textureUrl;
+        this._fontJsonUrl = resources.jsonUrl;
+        this._fontShaderUrl = resources.shaderUrl;
+        this._resourceKey = MsdfText.getFontResourceKey(
+            resources.textureUrl,
+            resources.jsonUrl,
+            resources.shaderUrl
+        );
+        this.applyLoadedFont(font);
+    }
+
+    private setFontResourceUrls(textureUrl: string, jsonUrl: string, shaderUrl: string): void {
+        if (
+            this._fontTextureUrl === textureUrl &&
+            this._fontJsonUrl === jsonUrl &&
+            this._fontShaderUrl === shaderUrl
+        ) {
+            return;
+        }
+
+        this._fontTextureUrl = textureUrl;
+        this._fontJsonUrl = jsonUrl;
+        this._fontShaderUrl = shaderUrl;
+        if (!this.isInitialized()) {
+            return;
+        }
+
+        this.reloadFont();
+    }
+
+    private hasCompleteFontResources(): boolean {
+        return !!this._fontTextureUrl && !!this._fontJsonUrl && !!this._fontShaderUrl;
+    }
+
+    private clearFontState(): void {
+        this._resourceKey = "";
+        this._msdfFont = null;
+    }
+
+    private applyLoadedFont(font: MsdfBitmapFont): void {
+        const resources = {
+            textureUrl: this._fontTextureUrl,
+            jsonUrl: this._fontJsonUrl,
+            shaderUrl: this._fontShaderUrl,
+        };
+        MsdfText.loadedFontCache.set(
+            MsdfText.getFontResourceKey(
+                resources.textureUrl,
+                resources.jsonUrl,
+                resources.shaderUrl
+            ),
+            font
+        );
+        this.cacheLoadedFontReferences(font, resources);
+        this.resetFont(font);
+        this.event(Laya.Event.LOADED);
+    }
+
+    private reloadFont(): void {
+        if (!this.isInitialized()) {
+            return;
+        }
+
+        if (!this.hasCompleteFontResources()) {
+            this.clearFontState();
+            this.resetRenderState();
+            return;
+        }
+
+        const nextKey = MsdfText.getFontResourceKey(
+            this._fontTextureUrl,
+            this._fontJsonUrl,
+            this._fontShaderUrl
+        );
+        this._resourceKey = nextKey;
+        this._msdfFont = null;
+
+        const loadedFont = MsdfText.loadedFontCache.get(nextKey);
+        if (loadedFont) {
+            this.applyLoadedFont(loadedFont);
+            return;
+        }
+
+        const cachedResourceFont = this.createFontFromCachedResources({
+            textureUrl: this._fontTextureUrl,
+            jsonUrl: this._fontJsonUrl,
+            shaderUrl: this._fontShaderUrl,
+        });
+        if (cachedResourceFont) {
+            this.applyLoadedFont(cachedResourceFont);
+            return;
+        }
+
+        MsdfText.preload(this._fontTextureUrl, this._fontJsonUrl, this._fontShaderUrl)
+            .then((font) => {
+                if (this.destroyed || this._resourceKey !== nextKey) {
+                    return;
+                }
+
+                this.applyLoadedFont(font);
+            })
+            .catch((error) => {
+                console.error("[MsdfText] failed to load font resources", error);
+            });
     }
 
     private requireFont(): MsdfBitmapFont {
@@ -2615,6 +3308,10 @@ export class MsdfText extends Laya.Text {
     }
 
     private refreshAfterPlainTextLayoutChange(invalidateBatchCache: boolean = false): void {
+        if (!this.isInitialized()) {
+            return;
+        }
+
         this._plainTextLayoutDirty = true;
         if (invalidateBatchCache) {
             this.invalidatePlainTextBatchCache();
@@ -2623,11 +3320,19 @@ export class MsdfText extends Laya.Text {
     }
 
     private refreshAfterPlainTextStyleChange(): void {
+        if (!this.isInitialized()) {
+            return;
+        }
+
         this.invalidatePlainTextBatchCache();
         this.refresh();
     }
 
     private refreshAfterEffectChange(refreshNow: boolean = true): void {
+        if (!this.isInitialized()) {
+            return;
+        }
+
         this.invalidatePlainTextBatchCache();
         if (refreshNow) {
             this.refresh();
@@ -2936,6 +3641,10 @@ export class MsdfText extends Laya.Text {
     }
 
     private resetRenderState(): void {
+        if (!this.isInitialized()) {
+            return;
+        }
+
         this._contentWidth = 0;
         this._contentHeight = 0;
         this._lines = [];
@@ -2944,10 +3653,19 @@ export class MsdfText extends Laya.Text {
     }
 
     private clearRichTextClickAreas(): void {
+        if (!this._richTextClickAreas) {
+            this._richTextClickAreas = [];
+            return;
+        }
+
         this._richTextClickAreas.length = 0;
     }
 
     private syncRichTextClickState(): void {
+        if (!this.isInitialized()) {
+            return;
+        }
+
         const hasClickAreas = this._richTextClickAreas.length > 0;
 
         if (hasClickAreas) {
@@ -4113,11 +4831,19 @@ export class MsdfText extends Laya.Text {
     }
 
     refresh(): void {
+        if (!this.isInitialized()) {
+            return;
+        }
+
         this.markChanged();
         this.typeset();
     }
 
     protected override _typeset(): void {
+        if (!this.isInitialized()) {
+            return;
+        }
+
         this._isChanged = false;
         if (this._destroyed) {
             return;
@@ -4183,6 +4909,10 @@ export class MsdfText extends Laya.Text {
     }
 
     private redraw(): void {
+        if (!this.isInitialized()) {
+            return;
+        }
+
         if (this._bgDrawCmd) {
             this.graphics.removeCmd(this._bgDrawCmd);
         }

@@ -1,0 +1,39 @@
+{
+  "_$ver": 1,
+  "_$id": "edx6ln49",
+  "_$type": "Sprite",
+  "name": "Sprite",
+  "width": 400,
+  "height": 400,
+  "_$child": [
+    {
+      "_$id": "029fscuh",
+      "_$type": "83017376-45c6-4c18-8102-ffc59219b008",
+      "name": "labelTxt",
+      "scriptPath": "../src/msdf/MsdfLabel.ts",
+      "x": 10,
+      "y": 149,
+      "width": 288,
+      "height": 127.66666666666667,
+      "text": "我们不一样我们",
+      "font": "res://d624774d-e254-48a0-b128-3e03c9e913df",
+      "fontSize": 50,
+      "color": "rgba(220, 220, 220, 1)",
+      "fitContent": "height",
+      "align": "center",
+      "valign": "top",
+      "wordWrap": true,
+      "leading": 21,
+      "padding": "0,0,0,0",
+      "underlineColor": "rgba(103, 82, 82, 1)",
+      "stroke": 1.2,
+      "strokeColor": "rgba(43, 42, 11, 1)",
+      "glow": 0,
+      "glowColor": "rgba(66, 175, 42, 1)",
+      "shadowBlur": 0,
+      "shadowOffsetX": 0,
+      "shadowOffsetY": 0,
+      "shadowColor": "#000000"
+    }
+  ]
+}

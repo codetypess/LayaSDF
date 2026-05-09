@@ -59,34 +59,52 @@ export class Main extends Laya.Script {
 
         panel.refresh();
 
-        const labdesc = this.owner.getChildByName("labdesc") as MsdfLabel;
-        console.log(
-            "labdesc before1",
-            labdesc.constructor.name,
-            labdesc.textField.textHeight,
-            labdesc.textField.textHeight
-        );
-        labdesc.text = "";
-        console.log(
-            "labdesc after1",
-            labdesc.constructor.name,
-            labdesc.textField.textWidth,
-            labdesc.textField.textHeight
-        );
-        labdesc.text = "开始行军";
-        console.log(
-            "labdesc after1",
-            labdesc.constructor.name,
-            labdesc.textField.textWidth,
-            labdesc.textField.textHeight
-        );
-        Laya.timer.once(1000, this, () => {
+        Laya.timer.once(2000, this, () => {
+            const labdesc = this.owner.getChildByName("labdesc") as MsdfLabel;
+            console.log(
+                "labdesc before1",
+                labdesc.constructor.name,
+                labdesc.textField.textHeight,
+                labdesc.textField.textHeight
+            );
+            labdesc.text = "";
+            console.log(
+                "labdesc after1",
+                labdesc.constructor.name,
+                labdesc.textField.textWidth,
+                labdesc.textField.textHeight
+            );
+            labdesc.text = "开始行军";
+            console.log(
+                "labdesc after1",
+                labdesc.constructor.name,
+                labdesc.textField.textWidth,
+                labdesc.textField.textHeight
+            );
             console.log(
                 "labdesc after2",
                 labdesc.constructor.name,
                 labdesc.textField.textWidth,
                 labdesc.textField.textHeight
             );
+
+            Laya.loader.load("resources/Prefab2D.lh", Laya.Loader.HIERARCHY).then((prefab) => {
+                const node = prefab.create();
+                const label = node.getChildByName("labelTxt") as MsdfLabel;
+                console.log(
+                    "label before:",
+                    label.constructor.name,
+                    label.textField.textWidth,
+                    label.textField.textHeight
+                );
+                label.text = "开始行军";
+                console.log(
+                    "labd after",
+                    label.constructor.name,
+                    label.textField.textWidth,
+                    label.textField.textHeight
+                );
+            });
         });
     }
 
