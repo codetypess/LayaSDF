@@ -14767,6 +14767,7 @@ window.Laya = (function (exports) {
             var sameKey = preKey.submitType === SubmitBase.KEY_TRIANGLES &&
                 preKey.other === webGLImg.id &&
                 preKey.blendShader == this._nBlendType &&
+                !this.isStopMerge(this._curSubmit) &&
                 this._mesh.vertexNum + vertices.length / 2 < Context._MAXVERTNUM &&
                 this._curSubmit.material == this._material;
             if (!sameKey) {
@@ -14831,6 +14832,7 @@ window.Laya = (function (exports) {
             const sameKey = preKey.submitType === SubmitBase.KEY_TRIANGLES_MSDF &&
                 preKey.other === webGLImg.id &&
                 preKey.blendShader == this._nBlendType &&
+                !this.isStopMerge(this._curSubmit) &&
                 this._mesh.vertexNum + vertices.length / 2 < Context._MAXVERTNUM &&
                 this._curSubmit.material == this._material;
             if (!sameKey) {
@@ -36768,27 +36770,6 @@ ${uniformglsl}`;
         }
     }
 
-    class PerfTools {
-        static begin(block) {
-        }
-        static end(block) {
-        }
-    }
-    class PerformanceDefine {
-    }
-    window.PerformanceDefine = PerformanceDefine;
-    function PERF_BEGIN(block) {
-        PerfTools.begin(block);
-    }
-    window.PERF_BEGIN = PERF_BEGIN;
-    function PERF_END(block) {
-        PerfTools.end(block);
-    }
-    window.PERF_BEGIN = PERF_END;
-    function PERF_FRAMECLEAR() {
-    }
-    window.PERF_FRAMECLEAR = PERF_FRAMECLEAR;
-
     class Base64Tool {
         static init() {
             if (Base64Tool.lookup)
@@ -37588,6 +37569,27 @@ ${uniformglsl}`;
         }
     }
     WasmAdapter.Memory = typeof (WebAssembly) !== "undefined" ? WebAssembly.Memory : null;
+
+    class PerfTools {
+        static begin(block) {
+        }
+        static end(block) {
+        }
+    }
+    class PerformanceDefine {
+    }
+    window.PerformanceDefine = PerformanceDefine;
+    function PERF_BEGIN(block) {
+        PerfTools.begin(block);
+    }
+    window.PERF_BEGIN = PERF_BEGIN;
+    function PERF_END(block) {
+        PerfTools.end(block);
+    }
+    window.PERF_BEGIN = PERF_END;
+    function PERF_FRAMECLEAR() {
+    }
+    window.PERF_FRAMECLEAR = PERF_FRAMECLEAR;
 
     class CommandUniformMap {
         constructor(stateName) {

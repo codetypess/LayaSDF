@@ -28179,176 +28179,6 @@
         }
     }
 
-    class LensFlareSettingsLoader {
-        load(task) {
-            return task.loader.fetch(task.url, "json", task.progress.createCallback(), task.options).then(data => {
-                if (!data)
-                    return null;
-                let ret = new LensFlareData();
-                let basePath = Laya.URL.getPath(task.url);
-                let promises = [];
-                let elements = data.elements;
-                if (elements)
-                    for (let i = elements.length - 1; i >= 0; i--) {
-                        let e = elements[i];
-                        if (e.texture && e.texture._$uuid && '' != e.texture._$uuid) {
-                            let url = Laya.URL.getResURLByUUID(e.texture._$uuid);
-                            if (!url.startsWith("res://"))
-                                url = Laya.URL.join(basePath, url);
-                            promises.push(task.loader.load(url).then((t) => {
-                                e.texture = t;
-                            }));
-                        }
-                        if (e.tint) {
-                            e.tint = new Laya.Color(e.tint.r, e.tint.g, e.tint.b, e.tint.a);
-                        }
-                        if (e.positionOffset) {
-                            e.positionOffset = new Laya.Vector2(e.positionOffset.x, e.positionOffset.y);
-                        }
-                        if (e.scale) {
-                            e.scale = new Laya.Vector2(e.scale.x, e.scale.y);
-                        }
-                    }
-                return Promise.all(promises).then(() => {
-                    ret.elements = elements;
-                    return ret;
-                });
-            });
-        }
-    }
-    Laya.Loader.registerLoader(["lensflare"], LensFlareSettingsLoader);
-
-    var internalResources = {};
-    class Texture2DArrayLoader {
-        constructor() {
-            if (!internalResources) {
-                internalResources = {
-                    "default": Laya.Texture2DArray.defaultTexture
-                };
-                for (const key in internalResources) {
-                    Laya.Resource.internalResources.set(internalResources[key], true);
-                }
-            }
-        }
-        load(task) {
-            if (task.url.indexOf("internal/") != -1) {
-                const tex = internalResources[Laya.Utils.getBaseName(task.url)];
-                if (tex) {
-                    return Promise.resolve(tex);
-                }
-            }
-            return task.loader.fetch(task.url, "json", task.progress.createCallback(), task.options).then((data) => {
-                if (!data) {
-                    return null;
-                }
-                let width = data.width;
-                let height = data.height;
-                let depth = data.depth;
-                let format = data.format;
-                let mipmap = data.mipmap;
-                let sRGB = data.sRGB;
-                let premultiplyAlpha = !!data.premultiplyAlpha;
-                let invertY = !!data.invertY;
-                let textures = data.textures;
-                let urls = [];
-                for (let index = 0; index < textures.length; index++) {
-                    urls.push(textures[index]);
-                }
-                return Promise.all(urls.map((url) => {
-                    if (url) {
-                        return task.loader.fetch(url, "image", task.progress.createCallback(), task.options);
-                    }
-                    else {
-                        return Promise.resolve(null);
-                    }
-                })).then(images => {
-                    if (Laya.LayaGL.renderEngine.getCapable(Laya.RenderCapable.Texture3D)) {
-                        let tex = new Laya.Texture2DArray(width, height, depth, format, mipmap, sRGB);
-                        tex.setImageData(images, premultiplyAlpha, invertY);
-                        return tex;
-                    }
-                    else {
-                        return null;
-                    }
-                });
-            });
-        }
-    }
-    Laya.Loader.registerLoader(["tex2darray"], Texture2DArrayLoader, Laya.Loader.TEXTURE2DARRAY);
-
-    class BoundSphere {
-        get center() {
-            return this._center;
-        }
-        set center(value) {
-            value.cloneTo(this._center);
-        }
-        get radius() {
-            return this._radius;
-        }
-        set radius(value) {
-            this._radius = value;
-        }
-        constructor(center = new Laya.Vector3, radius = 0) {
-            this._center = center;
-            this._radius = radius;
-        }
-        toDefault() {
-            this._center.toDefault();
-            this._radius = 0;
-        }
-        static createFromSubPoints(points, start, count, out) {
-            if (points == null) {
-                throw new Error("points");
-            }
-            if (start < 0 || start >= points.length) {
-                throw new Error("start" + start + "Must be in the range [0, " + (points.length - 1) + "]");
-            }
-            if (count < 0 || (start + count) > points.length) {
-                throw new Error("count" + count + "Must be in the range <= " + points.length + "}");
-            }
-            var upperEnd = start + count;
-            var center = _tempVector3;
-            center.x = 0;
-            center.y = 0;
-            center.z = 0;
-            for (var i = start; i < upperEnd; ++i) {
-                Laya.Vector3.add(points[i], center, center);
-            }
-            var outCenter = out.center;
-            Laya.Vector3.scale(center, 1 / count, outCenter);
-            var radius = 0.0;
-            for (i = start; i < upperEnd; ++i) {
-                var distance = Laya.Vector3.distanceSquared(outCenter, points[i]);
-                if (distance > radius)
-                    radius = distance;
-            }
-            out.radius = Math.sqrt(radius);
-        }
-        static createfromPoints(points, out) {
-            if (points == null) {
-                throw new Error("points");
-            }
-            BoundSphere.createFromSubPoints(points, 0, points.length, out);
-        }
-        intersectsRayDistance(ray) {
-            return CollisionUtils.intersectsRayAndSphereRD(ray, this);
-        }
-        intersectsRayPoint(ray, outPoint) {
-            return CollisionUtils.intersectsRayAndSphereRP(ray, this, outPoint);
-        }
-        cloneTo(destObject) {
-            this._center.cloneTo(destObject._center);
-            destObject._radius = this._radius;
-        }
-        clone() {
-            var dest = new BoundSphere(new Laya.Vector3(), 0);
-            this.cloneTo(dest);
-            return dest;
-        }
-    }
-    const _tempVector3 = new Laya.Vector3();
-
     class BoundsImpl {
         get min() {
             return this.getMin();
@@ -28522,6 +28352,79 @@
     const TEMP_VECTOR3_MAX0 = new Laya.Vector3();
     const TEMP_VECTOR3_MAX1 = new Laya.Vector3();
 
+    class BoundSphere {
+        get center() {
+            return this._center;
+        }
+        set center(value) {
+            value.cloneTo(this._center);
+        }
+        get radius() {
+            return this._radius;
+        }
+        set radius(value) {
+            this._radius = value;
+        }
+        constructor(center = new Laya.Vector3, radius = 0) {
+            this._center = center;
+            this._radius = radius;
+        }
+        toDefault() {
+            this._center.toDefault();
+            this._radius = 0;
+        }
+        static createFromSubPoints(points, start, count, out) {
+            if (points == null) {
+                throw new Error("points");
+            }
+            if (start < 0 || start >= points.length) {
+                throw new Error("start" + start + "Must be in the range [0, " + (points.length - 1) + "]");
+            }
+            if (count < 0 || (start + count) > points.length) {
+                throw new Error("count" + count + "Must be in the range <= " + points.length + "}");
+            }
+            var upperEnd = start + count;
+            var center = _tempVector3;
+            center.x = 0;
+            center.y = 0;
+            center.z = 0;
+            for (var i = start; i < upperEnd; ++i) {
+                Laya.Vector3.add(points[i], center, center);
+            }
+            var outCenter = out.center;
+            Laya.Vector3.scale(center, 1 / count, outCenter);
+            var radius = 0.0;
+            for (i = start; i < upperEnd; ++i) {
+                var distance = Laya.Vector3.distanceSquared(outCenter, points[i]);
+                if (distance > radius)
+                    radius = distance;
+            }
+            out.radius = Math.sqrt(radius);
+        }
+        static createfromPoints(points, out) {
+            if (points == null) {
+                throw new Error("points");
+            }
+            BoundSphere.createFromSubPoints(points, 0, points.length, out);
+        }
+        intersectsRayDistance(ray) {
+            return CollisionUtils.intersectsRayAndSphereRD(ray, this);
+        }
+        intersectsRayPoint(ray, outPoint) {
+            return CollisionUtils.intersectsRayAndSphereRP(ray, this, outPoint);
+        }
+        cloneTo(destObject) {
+            this._center.cloneTo(destObject._center);
+            destObject._radius = this._radius;
+        }
+        clone() {
+            var dest = new BoundSphere(new Laya.Vector3(), 0);
+            this.cloneTo(dest);
+            return dest;
+        }
+    }
+    const _tempVector3 = new Laya.Vector3();
+
     class RandX {
         constructor(seed) {
             if (!(seed instanceof Array) || seed.length !== 4)
@@ -28585,6 +28488,103 @@
     }
     RandX._CONVERTION_BUFFER = new DataView(new ArrayBuffer(8));
     RandX.defaultRand = new RandX([0, Date.now() / 65536, 0, Date.now() % 65536]);
+
+    class LensFlareSettingsLoader {
+        load(task) {
+            return task.loader.fetch(task.url, "json", task.progress.createCallback(), task.options).then(data => {
+                if (!data)
+                    return null;
+                let ret = new LensFlareData();
+                let basePath = Laya.URL.getPath(task.url);
+                let promises = [];
+                let elements = data.elements;
+                if (elements)
+                    for (let i = elements.length - 1; i >= 0; i--) {
+                        let e = elements[i];
+                        if (e.texture && e.texture._$uuid && '' != e.texture._$uuid) {
+                            let url = Laya.URL.getResURLByUUID(e.texture._$uuid);
+                            if (!url.startsWith("res://"))
+                                url = Laya.URL.join(basePath, url);
+                            promises.push(task.loader.load(url).then((t) => {
+                                e.texture = t;
+                            }));
+                        }
+                        if (e.tint) {
+                            e.tint = new Laya.Color(e.tint.r, e.tint.g, e.tint.b, e.tint.a);
+                        }
+                        if (e.positionOffset) {
+                            e.positionOffset = new Laya.Vector2(e.positionOffset.x, e.positionOffset.y);
+                        }
+                        if (e.scale) {
+                            e.scale = new Laya.Vector2(e.scale.x, e.scale.y);
+                        }
+                    }
+                return Promise.all(promises).then(() => {
+                    ret.elements = elements;
+                    return ret;
+                });
+            });
+        }
+    }
+    Laya.Loader.registerLoader(["lensflare"], LensFlareSettingsLoader);
+
+    var internalResources = {};
+    class Texture2DArrayLoader {
+        constructor() {
+            if (!internalResources) {
+                internalResources = {
+                    "default": Laya.Texture2DArray.defaultTexture
+                };
+                for (const key in internalResources) {
+                    Laya.Resource.internalResources.set(internalResources[key], true);
+                }
+            }
+        }
+        load(task) {
+            if (task.url.indexOf("internal/") != -1) {
+                const tex = internalResources[Laya.Utils.getBaseName(task.url)];
+                if (tex) {
+                    return Promise.resolve(tex);
+                }
+            }
+            return task.loader.fetch(task.url, "json", task.progress.createCallback(), task.options).then((data) => {
+                if (!data) {
+                    return null;
+                }
+                let width = data.width;
+                let height = data.height;
+                let depth = data.depth;
+                let format = data.format;
+                let mipmap = data.mipmap;
+                let sRGB = data.sRGB;
+                let premultiplyAlpha = !!data.premultiplyAlpha;
+                let invertY = !!data.invertY;
+                let textures = data.textures;
+                let urls = [];
+                for (let index = 0; index < textures.length; index++) {
+                    urls.push(textures[index]);
+                }
+                return Promise.all(urls.map((url) => {
+                    if (url) {
+                        return task.loader.fetch(url, "image", task.progress.createCallback(), task.options);
+                    }
+                    else {
+                        return Promise.resolve(null);
+                    }
+                })).then(images => {
+                    if (Laya.LayaGL.renderEngine.getCapable(Laya.RenderCapable.Texture3D)) {
+                        let tex = new Laya.Texture2DArray(width, height, depth, format, mipmap, sRGB);
+                        tex.setImageData(images, premultiplyAlpha, invertY);
+                        return tex;
+                    }
+                    else {
+                        return null;
+                    }
+                });
+            });
+        }
+    }
+    Laya.Loader.registerLoader(["tex2darray"], Texture2DArrayLoader, Laya.Loader.TEXTURE2DARRAY);
 
     exports.ShadowLightType = void 0;
     (function (ShadowLightType) {
@@ -28654,6 +28654,29 @@
         }
     }
 
+    class TextMesh {
+        get text() {
+            return this._text;
+        }
+        set text(value) {
+            this._text = value;
+        }
+        get fontSize() {
+            return this._fontSize;
+        }
+        set fontSize(value) {
+            this._fontSize = value;
+        }
+        get color() {
+            return this._color;
+        }
+        set color(value) {
+            this._color = value;
+        }
+        constructor() {
+        }
+    }
+
     class Physics3DUtils {
     }
     Physics3DUtils.COLLISIONFILTERGROUP_DEFAULTFILTER = 0x1;
@@ -28694,29 +28717,6 @@
             this._height = 0;
             this._width = width;
             this._height = height;
-        }
-    }
-
-    class TextMesh {
-        get text() {
-            return this._text;
-        }
-        set text(value) {
-            this._text = value;
-        }
-        get fontSize() {
-            return this._fontSize;
-        }
-        set fontSize(value) {
-            this._fontSize = value;
-        }
-        get color() {
-            return this._color;
-        }
-        set color(value) {
-            this._color = value;
-        }
-        constructor() {
         }
     }
 
@@ -29181,13 +29181,6 @@
                 }
             }
             return pass;
-        }
-    }
-
-    class ShaderDefine {
-        constructor(index, value) {
-            this._index = index;
-            this._value = value;
         }
     }
 
@@ -30608,6 +30601,13 @@
         }
     }
 
+    class ShaderDefine {
+        constructor(index, value) {
+            this._index = index;
+            this._value = value;
+        }
+    }
+
     exports.D6MotionType = void 0;
     (function (D6MotionType) {
         D6MotionType[D6MotionType["eX"] = 0] = "eX";
@@ -30634,6 +30634,314 @@
     })(exports.D6Drive || (exports.D6Drive = {}));
 
     var Script3D = Laya.Script;
+
+    class HLODRender extends BaseRender {
+        constructor() {
+            super();
+            this._singleton = false;
+        }
+        get curHLODRS() {
+            return this._curHLODRS;
+        }
+        set curHLODRS(value) {
+            if (!this._curHLODRS) {
+                this._renderElements = [];
+                this._renderElements.push(new RenderElement());
+                this._renderElements[0].render = this;
+            }
+            if (value != this._curHLODRS) {
+                this._changeMesh(value.HLODMesh);
+                this._curHLODRS = value;
+                this._createRenderelementByHLODElement(this._curHLODRS, this._renderElements[0]);
+            }
+        }
+        _createRenderelementByHLODElement(source, out) {
+            out.setGeometry(source.HLODMesh);
+            out.material = source.material;
+        }
+        _changeMesh(lodMesh) {
+            var defineDatas = this._baseRenderNode.shaderData;
+            this.boundsChange = true;
+            let meshDefines = MeshFilter._meshVerticeDefine;
+            if (this.curHLODRS) {
+                MeshUtil.getMeshDefine(this.curHLODRS.HLODMesh.batchMesh, meshDefines);
+                for (var i = 0, n = meshDefines.length; i < n; i++)
+                    defineDatas.removeDefine(MeshFilter._meshVerticeDefine[i]);
+            }
+            if (lodMesh) {
+                MeshUtil.getMeshDefine(lodMesh.batchMesh, meshDefines);
+                for (var i = 0, n = MeshFilter._meshVerticeDefine.length; i < n; i++)
+                    defineDatas.addDefine(MeshFilter._meshVerticeDefine[i]);
+            }
+            this._curSubBatchMeshBounds.length = lodMesh.batchSubMeshInfo.length;
+            for (let i = 0, n = lodMesh.batchSubMeshInfo.length; i < n; i++) {
+                this._curSubBatchMeshBounds[i] = this._curSubBatchMeshBounds[i] ? this._curSubBatchMeshBounds[i] : new Bounds();
+            }
+        }
+        _applyLightMapParams() {
+            if (!this._scene)
+                return;
+            var shaderValues = this._baseRenderNode.shaderData;
+            var lightMap = this._curHLODRS.lightmap;
+            if (lightMap && lightMap.lightmapColor) {
+                shaderValues.setTexture(RenderableSprite3D.LIGHTMAP, lightMap.lightmapColor);
+                shaderValues.addDefine(RenderableSprite3D.SAHDERDEFINE_LIGHTMAP);
+                if (lightMap.lightmapDirection) {
+                    shaderValues.setTexture(RenderableSprite3D.LIGHTMAP_DIRECTION, lightMap.lightmapDirection);
+                    shaderValues.addDefine(RenderableSprite3D.SHADERDEFINE_LIGHTMAP_DIRECTIONAL);
+                }
+                else {
+                    shaderValues.removeDefine(RenderableSprite3D.SHADERDEFINE_LIGHTMAP_DIRECTIONAL);
+                }
+            }
+            else {
+                shaderValues.removeDefine(RenderableSprite3D.SAHDERDEFINE_LIGHTMAP);
+                shaderValues.removeDefine(RenderableSprite3D.SHADERDEFINE_LIGHTMAP_DIRECTIONAL);
+            }
+        }
+        _calculateBoundingBox() {
+            if (this._curHLODRS) {
+                var sharedMesh = this._curHLODRS.HLODMesh;
+                if (sharedMesh) {
+                    var worldMat = this._transform.worldMatrix;
+                    sharedMesh.batchMesh.bounds._tranform(worldMat, this._bounds);
+                }
+                for (let i = 0, n = this._curSubBatchMeshBounds.length; i < n; i++) {
+                    sharedMesh.batchSubMeshInfo[i].bounds._tranform(worldMat, this._curSubBatchMeshBounds[i]);
+                }
+            }
+        }
+        _renderUpdate(context) {
+            this._applyLightMapParams();
+            this._baseRenderNode.shaderData.setMatrix4x4(Sprite3D.WORLDMATRIX, this._transform.worldMatrix);
+        }
+        _needRender(boundFrustum, context) {
+            if (boundFrustum) {
+                if (boundFrustum.intersects(this.bounds)) {
+                    let hodMesh = this.curHLODRS.HLODMesh.drawSubMeshs;
+                    let lodbatchMesh = this._curHLODRS.HLODMesh.batchSubMeshInfo;
+                    hodMesh.length = 0;
+                    for (let i = 0, n = this._curSubBatchMeshBounds.length; i < n; i++) {
+                        if (boundFrustum.intersects(this._curSubBatchMeshBounds[i])) {
+                            hodMesh.push(lodbatchMesh[i]);
+                        }
+                    }
+                    this._curHLODRS.HLODMesh.drawSubMeshs = hodMesh;
+                    return true;
+                }
+                else
+                    return false;
+            }
+            else {
+                return true;
+            }
+        }
+        onDestroy() {
+            super.onDestroy();
+            this._renderElements.forEach(element => {
+                element.material._removeReference();
+                element.destroy();
+            });
+            this._renderElements = null;
+        }
+    }
+
+    const tempVec = new Laya.Vector3();
+    class HLOD extends Laya.Component {
+        constructor() {
+            super();
+            this._singleton = true;
+        }
+        get bounds() {
+            return this._bounds;
+        }
+        set bounds(value) {
+            this._bounds = value;
+            this.recalculateBounds();
+        }
+        get lodResource() {
+            return this._resourceList;
+        }
+        set lodResource(value) {
+            this._resourceList = value;
+        }
+        get lodCullRateArray() {
+            return this._lodRateArray;
+        }
+        set lodCullRateArray(value) {
+            value.sort((a, b) => b - a);
+            this._lodRateArray = value;
+        }
+        _applyLODResource(resource) {
+            this._curLODSource = resource;
+            let element = resource.resources;
+            for (let i = 0, n = element.length; i < n; i++) {
+                let hlodRender = this.owner.addComponent(HLODRender);
+                this._curRender.push(hlodRender);
+                hlodRender.curHLODRS = element[i];
+            }
+        }
+        _releaseGroupRender() {
+            this._curRender.forEach(element => {
+                element.destroy();
+            });
+            this._curRender = [];
+        }
+        recalculateBounds() {
+            let extend = this._bounds.getExtent();
+            this._size = 2 * Math.max(extend.x, extend.y, extend.z);
+        }
+        onPreRender() {
+            let checkCamera = this.owner.scene.cullInfoCamera;
+            let maxYDistance = checkCamera.maxlocalYDistance;
+            let cameraFrustum = checkCamera.boundFrustum;
+            Laya.Vector3.subtract(this.owner.transform.position, checkCamera.transform.position, tempVec);
+            let length = tempVec.length();
+            if (length > checkCamera.farPlane || cameraFrustum.containsPoint(this.owner.transform.position) == 0) {
+                return;
+            }
+            let rateYDistance = length / checkCamera.farPlane * maxYDistance;
+            let rate = (this._size / rateYDistance);
+            for (let i = 0; i < this._lodRateArray.length; i++) {
+                if (rate < this._lodRateArray[i])
+                    continue;
+                this.applyResource(this._resourceList[i]);
+                break;
+            }
+        }
+        onUpdate() {
+            this._curLODSource.updateMark = Camera._updateMark;
+        }
+        applyResource(resource) {
+            if (resource == this._curLODSource)
+                return;
+            if (resource.loaded) {
+                if (this._curLODSource) {
+                    this._releaseGroupRender();
+                    this._applyLODResource(resource);
+                }
+            }
+            else {
+                resource.load(this.applyResource, this);
+            }
+        }
+    }
+
+    class HLODBatchMesh extends GeometryElement {
+        constructor() {
+            super(Laya.MeshTopology.Triangles, Laya.DrawType.DrawElement);
+        }
+        get batchMesh() {
+            return this._mesh;
+        }
+        set batchMesh(mesh) {
+            if (this._mesh != mesh) {
+                this._mesh && (this._mesh._removeReference());
+                this.indexFormat = mesh.indexFormat;
+                this._mesh = mesh;
+                this._mesh._addReference();
+            }
+        }
+        get batchSubMeshInfo() {
+            return this._batchSubMeshInfos;
+        }
+        set batchSubMeshInfo(value) {
+            this._batchSubMeshInfos = value;
+        }
+        get drawSubMeshs() {
+            return this._drawSubMeshs;
+        }
+        set drawSubMeshs(value) {
+            this._drawSubMeshs = value;
+        }
+        _prepareRender(state) {
+            this._mesh._uploadVerticesData();
+            return true;
+        }
+        _updateRenderParams(state) {
+            var mesh = this._mesh;
+            var byteCount;
+            switch (mesh.indexFormat) {
+                case Laya.IndexFormat.UInt32:
+                    byteCount = 4;
+                    break;
+                case Laya.IndexFormat.UInt16:
+                    byteCount = 2;
+                    break;
+                case Laya.IndexFormat.UInt8:
+                    byteCount = 1;
+                    break;
+            }
+            this.clearRenderParams();
+            this.bufferState = mesh._bufferState;
+            if (this._drawSubMeshs) {
+                this._drawSubMeshs.forEach(element => {
+                    this.setDrawElemenParams(element.drawPramas.y, element.drawPramas.x * byteCount);
+                });
+            }
+        }
+        destroy() {
+            this._mesh && this._mesh._removeReference();
+            delete this._batchSubMeshInfos;
+            delete this._drawSubMeshs;
+        }
+    }
+
+    class HLODConfig {
+    }
+    class HLODBatchSubMesh {
+    }
+    class HLODElement {
+        get material() {
+            return this._material;
+        }
+        set material(value) {
+            if (this._material != value) {
+                this._material && this._material._removeReference();
+                this._material = value;
+                this._material._addReference();
+            }
+        }
+        get lightmap() {
+            return this._lightmap;
+        }
+        set lightmap(value) {
+            if (this._lightmap != value) {
+                if (this._lightmap) {
+                    this._lightmap.lightmapColor._removeReference();
+                    this._lightmap.lightmapDirection._removeReference();
+                }
+                this._lightmap = value;
+                this._lightmap.lightmapColor._addReference();
+                this._lightmap.lightmapDirection._addReference();
+            }
+            this._lightmap = value;
+        }
+        release() {
+            this.HLODMesh.destroy();
+            this.material.destroy();
+            if (this.lightmap) {
+                this._lightmap.lightmapColor.destroy();
+                this._lightmap.lightmapDirection.destroy();
+            }
+        }
+    }
+    class HLODResourceGroup {
+        load(callFun, hlod) {
+            if (!this.loaded) {
+                Laya.Laya.loader.load(this.url, Laya.Handler.create(this, (res) => {
+                    callFun.apply(hlod, [this]);
+                    this.loaded = true;
+                }, [this]));
+            }
+        }
+        release() {
+            this.resources.forEach(element => {
+                element.release();
+            });
+            this.loaded = false;
+        }
+    }
 
     class StaticBatchSubInfo {
         constructor() {
@@ -30989,314 +31297,6 @@
         merge(info) {
             let staticMeshRender = StaticBatchMeshRender.create(info);
             return staticMeshRender;
-        }
-    }
-
-    class HLODRender extends BaseRender {
-        constructor() {
-            super();
-            this._singleton = false;
-        }
-        get curHLODRS() {
-            return this._curHLODRS;
-        }
-        set curHLODRS(value) {
-            if (!this._curHLODRS) {
-                this._renderElements = [];
-                this._renderElements.push(new RenderElement());
-                this._renderElements[0].render = this;
-            }
-            if (value != this._curHLODRS) {
-                this._changeMesh(value.HLODMesh);
-                this._curHLODRS = value;
-                this._createRenderelementByHLODElement(this._curHLODRS, this._renderElements[0]);
-            }
-        }
-        _createRenderelementByHLODElement(source, out) {
-            out.setGeometry(source.HLODMesh);
-            out.material = source.material;
-        }
-        _changeMesh(lodMesh) {
-            var defineDatas = this._baseRenderNode.shaderData;
-            this.boundsChange = true;
-            let meshDefines = MeshFilter._meshVerticeDefine;
-            if (this.curHLODRS) {
-                MeshUtil.getMeshDefine(this.curHLODRS.HLODMesh.batchMesh, meshDefines);
-                for (var i = 0, n = meshDefines.length; i < n; i++)
-                    defineDatas.removeDefine(MeshFilter._meshVerticeDefine[i]);
-            }
-            if (lodMesh) {
-                MeshUtil.getMeshDefine(lodMesh.batchMesh, meshDefines);
-                for (var i = 0, n = MeshFilter._meshVerticeDefine.length; i < n; i++)
-                    defineDatas.addDefine(MeshFilter._meshVerticeDefine[i]);
-            }
-            this._curSubBatchMeshBounds.length = lodMesh.batchSubMeshInfo.length;
-            for (let i = 0, n = lodMesh.batchSubMeshInfo.length; i < n; i++) {
-                this._curSubBatchMeshBounds[i] = this._curSubBatchMeshBounds[i] ? this._curSubBatchMeshBounds[i] : new Bounds();
-            }
-        }
-        _applyLightMapParams() {
-            if (!this._scene)
-                return;
-            var shaderValues = this._baseRenderNode.shaderData;
-            var lightMap = this._curHLODRS.lightmap;
-            if (lightMap && lightMap.lightmapColor) {
-                shaderValues.setTexture(RenderableSprite3D.LIGHTMAP, lightMap.lightmapColor);
-                shaderValues.addDefine(RenderableSprite3D.SAHDERDEFINE_LIGHTMAP);
-                if (lightMap.lightmapDirection) {
-                    shaderValues.setTexture(RenderableSprite3D.LIGHTMAP_DIRECTION, lightMap.lightmapDirection);
-                    shaderValues.addDefine(RenderableSprite3D.SHADERDEFINE_LIGHTMAP_DIRECTIONAL);
-                }
-                else {
-                    shaderValues.removeDefine(RenderableSprite3D.SHADERDEFINE_LIGHTMAP_DIRECTIONAL);
-                }
-            }
-            else {
-                shaderValues.removeDefine(RenderableSprite3D.SAHDERDEFINE_LIGHTMAP);
-                shaderValues.removeDefine(RenderableSprite3D.SHADERDEFINE_LIGHTMAP_DIRECTIONAL);
-            }
-        }
-        _calculateBoundingBox() {
-            if (this._curHLODRS) {
-                var sharedMesh = this._curHLODRS.HLODMesh;
-                if (sharedMesh) {
-                    var worldMat = this._transform.worldMatrix;
-                    sharedMesh.batchMesh.bounds._tranform(worldMat, this._bounds);
-                }
-                for (let i = 0, n = this._curSubBatchMeshBounds.length; i < n; i++) {
-                    sharedMesh.batchSubMeshInfo[i].bounds._tranform(worldMat, this._curSubBatchMeshBounds[i]);
-                }
-            }
-        }
-        _renderUpdate(context) {
-            this._applyLightMapParams();
-            this._baseRenderNode.shaderData.setMatrix4x4(Sprite3D.WORLDMATRIX, this._transform.worldMatrix);
-        }
-        _needRender(boundFrustum, context) {
-            if (boundFrustum) {
-                if (boundFrustum.intersects(this.bounds)) {
-                    let hodMesh = this.curHLODRS.HLODMesh.drawSubMeshs;
-                    let lodbatchMesh = this._curHLODRS.HLODMesh.batchSubMeshInfo;
-                    hodMesh.length = 0;
-                    for (let i = 0, n = this._curSubBatchMeshBounds.length; i < n; i++) {
-                        if (boundFrustum.intersects(this._curSubBatchMeshBounds[i])) {
-                            hodMesh.push(lodbatchMesh[i]);
-                        }
-                    }
-                    this._curHLODRS.HLODMesh.drawSubMeshs = hodMesh;
-                    return true;
-                }
-                else
-                    return false;
-            }
-            else {
-                return true;
-            }
-        }
-        onDestroy() {
-            super.onDestroy();
-            this._renderElements.forEach(element => {
-                element.material._removeReference();
-                element.destroy();
-            });
-            this._renderElements = null;
-        }
-    }
-
-    const tempVec = new Laya.Vector3();
-    class HLOD extends Laya.Component {
-        constructor() {
-            super();
-            this._singleton = true;
-        }
-        get bounds() {
-            return this._bounds;
-        }
-        set bounds(value) {
-            this._bounds = value;
-            this.recalculateBounds();
-        }
-        get lodResource() {
-            return this._resourceList;
-        }
-        set lodResource(value) {
-            this._resourceList = value;
-        }
-        get lodCullRateArray() {
-            return this._lodRateArray;
-        }
-        set lodCullRateArray(value) {
-            value.sort((a, b) => b - a);
-            this._lodRateArray = value;
-        }
-        _applyLODResource(resource) {
-            this._curLODSource = resource;
-            let element = resource.resources;
-            for (let i = 0, n = element.length; i < n; i++) {
-                let hlodRender = this.owner.addComponent(HLODRender);
-                this._curRender.push(hlodRender);
-                hlodRender.curHLODRS = element[i];
-            }
-        }
-        _releaseGroupRender() {
-            this._curRender.forEach(element => {
-                element.destroy();
-            });
-            this._curRender = [];
-        }
-        recalculateBounds() {
-            let extend = this._bounds.getExtent();
-            this._size = 2 * Math.max(extend.x, extend.y, extend.z);
-        }
-        onPreRender() {
-            let checkCamera = this.owner.scene.cullInfoCamera;
-            let maxYDistance = checkCamera.maxlocalYDistance;
-            let cameraFrustum = checkCamera.boundFrustum;
-            Laya.Vector3.subtract(this.owner.transform.position, checkCamera.transform.position, tempVec);
-            let length = tempVec.length();
-            if (length > checkCamera.farPlane || cameraFrustum.containsPoint(this.owner.transform.position) == 0) {
-                return;
-            }
-            let rateYDistance = length / checkCamera.farPlane * maxYDistance;
-            let rate = (this._size / rateYDistance);
-            for (let i = 0; i < this._lodRateArray.length; i++) {
-                if (rate < this._lodRateArray[i])
-                    continue;
-                this.applyResource(this._resourceList[i]);
-                break;
-            }
-        }
-        onUpdate() {
-            this._curLODSource.updateMark = Camera._updateMark;
-        }
-        applyResource(resource) {
-            if (resource == this._curLODSource)
-                return;
-            if (resource.loaded) {
-                if (this._curLODSource) {
-                    this._releaseGroupRender();
-                    this._applyLODResource(resource);
-                }
-            }
-            else {
-                resource.load(this.applyResource, this);
-            }
-        }
-    }
-
-    class HLODBatchMesh extends GeometryElement {
-        constructor() {
-            super(Laya.MeshTopology.Triangles, Laya.DrawType.DrawElement);
-        }
-        get batchMesh() {
-            return this._mesh;
-        }
-        set batchMesh(mesh) {
-            if (this._mesh != mesh) {
-                this._mesh && (this._mesh._removeReference());
-                this.indexFormat = mesh.indexFormat;
-                this._mesh = mesh;
-                this._mesh._addReference();
-            }
-        }
-        get batchSubMeshInfo() {
-            return this._batchSubMeshInfos;
-        }
-        set batchSubMeshInfo(value) {
-            this._batchSubMeshInfos = value;
-        }
-        get drawSubMeshs() {
-            return this._drawSubMeshs;
-        }
-        set drawSubMeshs(value) {
-            this._drawSubMeshs = value;
-        }
-        _prepareRender(state) {
-            this._mesh._uploadVerticesData();
-            return true;
-        }
-        _updateRenderParams(state) {
-            var mesh = this._mesh;
-            var byteCount;
-            switch (mesh.indexFormat) {
-                case Laya.IndexFormat.UInt32:
-                    byteCount = 4;
-                    break;
-                case Laya.IndexFormat.UInt16:
-                    byteCount = 2;
-                    break;
-                case Laya.IndexFormat.UInt8:
-                    byteCount = 1;
-                    break;
-            }
-            this.clearRenderParams();
-            this.bufferState = mesh._bufferState;
-            if (this._drawSubMeshs) {
-                this._drawSubMeshs.forEach(element => {
-                    this.setDrawElemenParams(element.drawPramas.y, element.drawPramas.x * byteCount);
-                });
-            }
-        }
-        destroy() {
-            this._mesh && this._mesh._removeReference();
-            delete this._batchSubMeshInfos;
-            delete this._drawSubMeshs;
-        }
-    }
-
-    class HLODConfig {
-    }
-    class HLODBatchSubMesh {
-    }
-    class HLODElement {
-        get material() {
-            return this._material;
-        }
-        set material(value) {
-            if (this._material != value) {
-                this._material && this._material._removeReference();
-                this._material = value;
-                this._material._addReference();
-            }
-        }
-        get lightmap() {
-            return this._lightmap;
-        }
-        set lightmap(value) {
-            if (this._lightmap != value) {
-                if (this._lightmap) {
-                    this._lightmap.lightmapColor._removeReference();
-                    this._lightmap.lightmapDirection._removeReference();
-                }
-                this._lightmap = value;
-                this._lightmap.lightmapColor._addReference();
-                this._lightmap.lightmapDirection._addReference();
-            }
-            this._lightmap = value;
-        }
-        release() {
-            this.HLODMesh.destroy();
-            this.material.destroy();
-            if (this.lightmap) {
-                this._lightmap.lightmapColor.destroy();
-                this._lightmap.lightmapDirection.destroy();
-            }
-        }
-    }
-    class HLODResourceGroup {
-        load(callFun, hlod) {
-            if (!this.loaded) {
-                Laya.Laya.loader.load(this.url, Laya.Handler.create(this, (res) => {
-                    callFun.apply(hlod, [this]);
-                    this.loaded = true;
-                }, [this]));
-            }
-        }
-        release() {
-            this.resources.forEach(element => {
-                element.release();
-            });
-            this.loaded = false;
         }
     }
 

@@ -2273,7 +2273,9 @@
         }
         set transform(data) {
             this._transform = data;
-            this._nativeObj.setTransform(data._nativeObj);
+            if (data && data._nativeObj) {
+                this._nativeObj.setTransform(data._nativeObj);
+            }
         }
         get transform() {
             return this._transform;

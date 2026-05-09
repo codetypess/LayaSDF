@@ -138,6 +138,33 @@
         }
     }
 
+    class Gyroscope extends Laya.EventDispatcher {
+        static get instance() {
+            Gyroscope._instance = Gyroscope._instance || new Gyroscope(0);
+            return Gyroscope._instance;
+        }
+        constructor(singleton) {
+            super();
+            this.onDeviceOrientationChange = this.onDeviceOrientationChange.bind(this);
+        }
+        onStartListeningToType(type) {
+            if (type == Laya.Event.CHANGE)
+                Laya.ILaya.Browser.window.addEventListener('deviceorientation', this.onDeviceOrientationChange);
+            return this;
+        }
+        onDeviceOrientationChange(e) {
+            Gyroscope.info.alpha = e.alpha;
+            Gyroscope.info.beta = e.beta;
+            Gyroscope.info.gamma = e.gamma;
+            if (e.webkitCompassHeading) {
+                Gyroscope.info.alpha = e.webkitCompassHeading * -1;
+                Gyroscope.info.compassAccuracy = e.webkitCompassAccuracy;
+            }
+            this.event(Laya.Event.CHANGE, [e.absolute, Gyroscope.info]);
+        }
+    }
+    Gyroscope.info = new RotationInfo();
+
     class GeolocationInfo {
         setPosition(pos) {
             this.pos = pos;
@@ -226,33 +253,6 @@
             }
         }
     }
-
-    class Gyroscope extends Laya.EventDispatcher {
-        static get instance() {
-            Gyroscope._instance = Gyroscope._instance || new Gyroscope(0);
-            return Gyroscope._instance;
-        }
-        constructor(singleton) {
-            super();
-            this.onDeviceOrientationChange = this.onDeviceOrientationChange.bind(this);
-        }
-        onStartListeningToType(type) {
-            if (type == Laya.Event.CHANGE)
-                Laya.ILaya.Browser.window.addEventListener('deviceorientation', this.onDeviceOrientationChange);
-            return this;
-        }
-        onDeviceOrientationChange(e) {
-            Gyroscope.info.alpha = e.alpha;
-            Gyroscope.info.beta = e.beta;
-            Gyroscope.info.gamma = e.gamma;
-            if (e.webkitCompassHeading) {
-                Gyroscope.info.alpha = e.webkitCompassHeading * -1;
-                Gyroscope.info.compassAccuracy = e.webkitCompassAccuracy;
-            }
-            this.event(Laya.Event.CHANGE, [e.absolute, Gyroscope.info]);
-        }
-    }
-    Gyroscope.info = new RotationInfo();
 
     exports.AccelerationInfo = AccelerationInfo;
     exports.Accelerator = Accelerator;
