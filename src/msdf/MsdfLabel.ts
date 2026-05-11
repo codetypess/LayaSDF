@@ -1,4 +1,4 @@
-import { MsdfBitmapFont, MsdfOverflow, MsdfText, MsdfTextLineMetric } from "./MsdfText";
+import { MsdfOverflow, MsdfText, MsdfTextLineMetric } from "./MsdfText";
 
 type MsdfLabelFitContent = "no" | "yes" | "height";
 type MsdfTemplateVars = Record<string, unknown>;
@@ -104,27 +104,6 @@ export class MsdfLabel extends Laya.Label {
             child.numChildren === 0 &&
             !child.name
         );
-    }
-
-    static preload(
-        textureUrl: string,
-        jsonUrl: string,
-        shaderUrl: string
-    ): Promise<MsdfBitmapFont> {
-        return MsdfText.preload(textureUrl, jsonUrl, shaderUrl);
-    }
-
-    static registerFont(
-        name: string,
-        textureUrl: string,
-        jsonUrl: string,
-        shaderUrl: string
-    ): void {
-        MsdfText.registerFont(name, textureUrl, jsonUrl, shaderUrl);
-    }
-
-    static unregisterFont(name: string): void {
-        MsdfText.unregisterFont(name);
     }
 
     override get text(): string {

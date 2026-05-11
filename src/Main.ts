@@ -1,4 +1,5 @@
 import { MsdfLabel } from "./msdf/MsdfLabel";
+import { MsdfBitmapFont } from "./msdf/MsdfText";
 
 const { regClass } = Laya;
 
@@ -43,7 +44,7 @@ type MainCompareGroup = {
 export class Main extends Laya.Script {
     override onStart(): void {
         Laya.stage.bgColor = "#0b1220";
-        MsdfLabel.registerFont("demo-msdf", MSDF_ATLAS_URL, MSDF_JSON_URL, MSDF_SHADER_URL);
+        MsdfBitmapFont.registerFont("demo-msdf", MSDF_ATLAS_URL, MSDF_JSON_URL, MSDF_SHADER_URL);
 
         const groups = this.createRegressionGroups();
         const panel = this.createPanel();

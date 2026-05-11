@@ -1,4 +1,5 @@
 import { MsdfLabel } from "./msdf/MsdfLabel";
+import { MsdfBitmapFont } from "./msdf/MsdfText";
 
 const { regClass } = Laya;
 
@@ -50,7 +51,7 @@ export class TestOverflow extends Laya.Script {
 
     override onStart(): void {
         Laya.stage.bgColor = "#0b1220";
-        MsdfLabel.registerFont("demo-msdf", MSDF_ATLAS_URL, MSDF_JSON_URL, MSDF_SHADER_URL);
+        MsdfBitmapFont.registerFont("demo-msdf", MSDF_ATLAS_URL, MSDF_JSON_URL, MSDF_SHADER_URL);
 
         const label = this.createMsdfLabel("overflow=hidden：超出的内容应该直接被裁掉，不能继续画到卡片外。");
         label.x = PANEL_X + CONTENT_PADDING;
