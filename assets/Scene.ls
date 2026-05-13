@@ -25,13 +25,14 @@
       "_$id": "y66t5w2r",
       "_$type": "Label",
       "name": "Label",
-      "x": 11,
-      "y": 7,
+      "x": 996,
+      "y": 124,
       "width": 120,
       "height": 28,
-      "text": "Label",
+      "text": "Label[img]resources/img_icon_item_gold.png[/img]",
       "fontSize": 25,
       "color": "#FFFFFF",
+      "ubb": true,
       "valign": "top",
       "padding": "0,0,0,0"
     },
@@ -61,7 +62,8 @@
       "shadowBlur": 0,
       "shadowOffsetX": 0,
       "shadowOffsetY": 0,
-      "shadowColor": "#000000"
+      "shadowColor": "#000000",
+      "fontWeight": 400
     },
     {
       "_$id": "gx5vyjeq",
@@ -91,7 +93,8 @@
       "shadowBlur": 0,
       "shadowOffsetX": 0,
       "shadowOffsetY": 0,
-      "shadowColor": "#000000"
+      "shadowColor": "#000000",
+      "fontWeight": 400
     },
     {
       "_$id": "sf6be9ox",
@@ -121,7 +124,8 @@
       "shadowBlur": 0,
       "shadowOffsetX": 0,
       "shadowOffsetY": 0,
-      "shadowColor": "#000000"
+      "shadowColor": "#000000",
+      "fontWeight": 400
     },
     {
       "_$id": "vqyy8y3t",
@@ -152,7 +156,8 @@
       "shadowBlur": 0,
       "shadowOffsetX": 0,
       "shadowOffsetY": 0,
-      "shadowColor": "#000000"
+      "shadowColor": "#000000",
+      "fontWeight": 400
     },
     {
       "_$id": "a3rin0m4",
@@ -180,7 +185,8 @@
       "shadowBlur": 0,
       "shadowOffsetX": 0,
       "shadowOffsetY": 0,
-      "shadowColor": "#000000"
+      "shadowColor": "#000000",
+      "fontWeight": 400
     }
   ]
 }

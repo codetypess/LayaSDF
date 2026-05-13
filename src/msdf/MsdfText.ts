@@ -333,9 +333,17 @@ export type MsdfRichTextRun = {
     style: MsdfRichTextStyle;
 };
 
+type MsdfRichTextInlineImage = {
+    src: string;
+    texture: Laya.Texture | null;
+    width: number;
+    height: number;
+};
+
 type MsdfRichTextRunMetadata = {
     link?: string | null;
     clickable?: boolean;
+    image?: MsdfRichTextInlineImage | null;
 };
 
 type MsdfRichTextCommand = {
@@ -343,6 +351,7 @@ type MsdfRichTextCommand = {
     style: MsdfRichTextStyle;
     link?: string | null;
     clickable?: boolean;
+    image?: MsdfRichTextInlineImage | null;
     x: number;
     y: number;
     width: number;
@@ -380,8 +389,28 @@ type MsdfRichTextLineSegment = {
     style: MsdfRichTextStyle;
     link?: string | null;
     clickable?: boolean;
+    image?: MsdfRichTextInlineImage | null;
     width: number;
     height: number;
+};
+
+type MsdfRichTextImageDraw = {
+    texture: Laya.Texture;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+};
+
+type MsdfInlineImageCacheEntry = {
+    texture: Laya.Texture | null;
+    loading: Promise<Laya.Texture | null> | null;
+    loadFailed: boolean;
+};
+
+type MsdfRichTextDrawData = {
+    drawBatches: MsdfDrawBatch[];
+    imageDraws: MsdfRichTextImageDraw[];
 };
 
 type MsdfRichTextClickArea = {
@@ -444,6 +473,7 @@ type MsdfTextRefreshResult = {
     contentHeight: number;
     lines: MsdfTextLineMetric[];
     drawBatches: MsdfDrawBatch[];
+    imageDraws?: MsdfRichTextImageDraw[];
     layout?: MsdfLayout;
 };
 
@@ -497,6 +527,7 @@ const EFFECT_FLAG_OUTLINE = 1;
 const EFFECT_FLAG_GLOW = 2;
 const EFFECT_FLAG_SHADOW = 4;
 const ELLIPSIS_TEXT = "…";
+const INLINE_IMAGE_PLACEHOLDER = "\ufffc";
 const QUAD_KIND_TEXT = 0;
 const QUAD_KIND_UNDERLINE = 1;
 const QUAD_KIND_STRIKETHROUGH = 2;
@@ -1017,6 +1048,10 @@ function isNil(value: unknown): value is null | undefined {
 
 function hasValue<T>(value: T | null | undefined): value is T {
     return !isNil(value);
+}
+
+function isUsableTexture(texture: Laya.Texture | null | undefined): texture is Laya.Texture {
+    return !!texture && !texture.destroyed;
 }
 
 function replaceEscapeChar(word: string): string {
@@ -1731,9 +1766,11 @@ export class MsdfText extends Laya.Text {
     private _scrollX = 0;
     private _scrollY = 0;
     private _drawBatches: MsdfDrawBatch[] = [];
+    private _richTextImageDraws: MsdfRichTextImageDraw[] = [];
     private _plainTextLayoutDirty = true;
     private _plainTextBatchCache: MsdfPlainTextBatchCache = createEmptyPlainTextBatchCache();
     private _richTextClickAreas: MsdfRichTextClickArea[] = [];
+    private _inlineImageCache = new Map<string, MsdfInlineImageCacheEntry>();
     private _richTextClickListening = false;
     private _richTextClickSavedHitArea!: Laya.IHitArea;
     private _richTextClickSavedMouseEnabled = false;
@@ -3093,6 +3130,98 @@ export class MsdfText extends Laya.Text {
         return value || fallback;
     }
 
+    private getInlineImageCacheEntry(src: string): MsdfInlineImageCacheEntry {
+        let entry = this._inlineImageCache.get(src);
+        if (entry) {
+            if (entry.texture?.destroyed) {
+                entry.texture = null;
+                entry.loadFailed = false;
+            }
+            return entry;
+        }
+
+        entry = {
+            texture: null,
+            loading: null,
+            loadFailed: false,
+        };
+        this._inlineImageCache.set(src, entry);
+        return entry;
+    }
+
+    private getInlineImageTexture(src: string): Laya.Texture | null {
+        const loadedTexture = this.getLoadedTextureAsset(src);
+        if (isUsableTexture(loadedTexture)) {
+            const entry = this.getInlineImageCacheEntry(src);
+            entry.texture = loadedTexture;
+            entry.loading = null;
+            entry.loadFailed = false;
+            return loadedTexture;
+        }
+
+        const entry = this.getInlineImageCacheEntry(src);
+        if (isUsableTexture(entry.texture)) {
+            return entry.texture;
+        }
+
+        if (!entry.loading && !entry.loadFailed) {
+            entry.loading = (Laya.loader.load(src, { silent: true }) as Promise<unknown>)
+                .then((loadedResource) => {
+                    entry.loading = null;
+                    const nextTexture =
+                        (loadedResource as Laya.Texture | null) ?? this.getLoadedTextureAsset(src);
+                    entry.texture = isUsableTexture(nextTexture) ? nextTexture : null;
+                    entry.loadFailed = !entry.texture;
+                    if (!this.destroyed) {
+                        this.refresh();
+                    }
+                    return entry.texture;
+                })
+                .catch((error) => {
+                    entry.loading = null;
+                    entry.loadFailed = true;
+                    console.error(`[MsdfText] failed to load inline image "${src}"`, error);
+                    return null;
+                });
+        }
+
+        return null;
+    }
+
+    private createRichTextInlineImage(element: Laya.HtmlElement): MsdfRichTextInlineImage | null {
+        const src = element.getAttrString("src", "").trim();
+        if (!src) {
+            return null;
+        }
+
+        const texture = this.getInlineImageTexture(src);
+        const explicitWidth = element.getAttrFloat("width", -1);
+        const explicitHeight = element.getAttrFloat("height", -1);
+
+        return {
+            src,
+            texture,
+            width: explicitWidth >= 0 ? explicitWidth : (texture?.sourceWidth ?? 0),
+            height: explicitHeight >= 0 ? explicitHeight : (texture?.sourceHeight ?? 0),
+        };
+    }
+
+    private getRichTextCommandMetrics(
+        text: string,
+        style: MsdfRichTextStyle,
+        metricCache: MsdfRichTextMetricCache,
+        image?: MsdfRichTextInlineImage | null
+    ): MsdfRichTextMetrics {
+        if (image) {
+            return {
+                width: image.width,
+                height: image.height,
+            };
+        }
+
+        return this.getRichTextMetrics(text, style, metricCache);
+    }
+
     private createBaseTextStyle(): Laya.TextStyle {
         const style = new Laya.TextStyle();
 
@@ -3157,9 +3286,10 @@ export class MsdfText extends Laya.Text {
         text: string,
         style: MsdfRichTextStyle,
         link: string | null = null,
-        clickable: boolean = false
+        clickable: boolean = false,
+        image: MsdfRichTextInlineImage | null = null
     ): void {
-        if (!text) {
+        if (!text && !image) {
             return;
         }
 
@@ -3167,7 +3297,9 @@ export class MsdfText extends Laya.Text {
             | (MsdfRichTextRun & MsdfRichTextRunMetadata)
             | undefined;
         if (
+            !image &&
             previous &&
+            !previous.image &&
             sameRichStyle(previous.style, style) &&
             (previous.link ?? null) === (link ?? null) &&
             !!previous.clickable === clickable
@@ -3181,6 +3313,7 @@ export class MsdfText extends Laya.Text {
             style,
             link,
             clickable,
+            image,
         };
         runs.push(run);
     }
@@ -3295,6 +3428,24 @@ export class MsdfText extends Laya.Text {
 
             if (element.type === htmlElementType.LinkEnd) {
                 currentLink = null;
+                continue;
+            }
+
+            if (element.type === htmlElementType.Image) {
+                const inlineImage = this.createRichTextInlineImage(element);
+                if (!inlineImage) {
+                    continue;
+                }
+
+                const richStyle = this.toRichTextStyle(element.style);
+                this.appendRichTextRun(
+                    runs,
+                    INLINE_IMAGE_PLACEHOLDER,
+                    richStyle,
+                    currentLink,
+                    hasValue(currentLink),
+                    inlineImage
+                );
                 continue;
             }
 
@@ -3797,10 +3948,12 @@ export class MsdfText extends Laya.Text {
 
     private applyRenderState(
         drawBatches: MsdfDrawBatch[],
-        layout: MsdfLayout = createEmptyLayout()
+        layout: MsdfLayout = createEmptyLayout(),
+        imageDraws: MsdfRichTextImageDraw[] = []
     ): void {
         this._layout = layout;
         this._drawBatches = drawBatches;
+        this._richTextImageDraws = imageDraws;
         this.applyAutoViewport();
         this.syncViewSize();
         this.syncRichTextClickState();
@@ -3812,7 +3965,11 @@ export class MsdfText extends Laya.Text {
         this._contentHeight = result.contentHeight;
         this._lines = result.lines;
         this.clampScroll();
-        this.applyRenderState(result.drawBatches, result.layout ?? createEmptyLayout());
+        this.applyRenderState(
+            result.drawBatches,
+            result.layout ?? createEmptyLayout(),
+            result.imageDraws ?? []
+        );
     }
 
     private resetRenderState(): void {
@@ -3824,7 +3981,7 @@ export class MsdfText extends Laya.Text {
         this._contentHeight = 0;
         this._lines = [];
         this.clearRichTextClickAreas();
-        this.applyRenderState([]);
+        this.applyRenderState([], createEmptyLayout(), []);
     }
 
     private clearRichTextClickAreas(): void {
@@ -4041,12 +4198,14 @@ export class MsdfText extends Laya.Text {
     private buildRichTextRefreshResult(): MsdfTextRefreshResult {
         const lines = this.layoutRunsForShrink();
         const shrinkScale = this.resolveShrinkScale(this._contentWidth, this._contentHeight);
+        const drawData = this.buildRichTextDrawData(lines, shrinkScale);
 
         return {
             contentWidth: this._contentWidth * shrinkScale,
             contentHeight: this._contentHeight * shrinkScale,
             lines: this.buildRichTextLineMetrics(lines, shrinkScale),
-            drawBatches: this.buildRichTextDrawBatches(lines, shrinkScale),
+            drawBatches: drawData.drawBatches,
+            imageDraws: drawData.imageDraws,
         };
     }
 
@@ -4119,6 +4278,7 @@ export class MsdfText extends Laya.Text {
             style: MsdfRichTextStyle;
             link?: string | null;
             clickable?: boolean;
+            image?: MsdfRichTextInlineImage | null;
         }>,
         fallbackHeight: number,
         metricCache: MsdfRichTextMetricCache
@@ -4132,17 +4292,23 @@ export class MsdfText extends Laya.Text {
         line.alignItems = segments[0]?.style.alignItems || this._alignItems;
 
         for (const segment of segments) {
-            if (!segment.text) {
+            if (!segment.text && !segment.image) {
                 continue;
             }
 
-            const metrics = this.getRichTextMetrics(segment.text, segment.style, metricCache);
+            const metrics = this.getRichTextCommandMetrics(
+                segment.text,
+                segment.style,
+                metricCache,
+                segment.image
+            );
             const cmdHeight = Math.max(metrics.height, 1);
             const cmd: MsdfRichTextCommand = {
                 text: segment.text,
                 style: segment.style,
                 link: segment.link ?? null,
                 clickable: !!segment.clickable,
+                image: segment.image ?? null,
                 x: width,
                 y: 0,
                 width: metrics.width,
@@ -4170,20 +4336,23 @@ export class MsdfText extends Laya.Text {
         style: MsdfRichTextStyle,
         metrics?: MsdfRichTextMetrics,
         link?: string | null,
-        clickable?: boolean
+        clickable?: boolean,
+        image?: MsdfRichTextInlineImage | null
     ): void {
         // cmd 是富文本排版阶段的中间结构，后续才会展开成真正提交给 GPU 的顶点数据。
-        if (!text || !state.currentLine) {
+        if ((!text && !image) || !state.currentLine) {
             return;
         }
 
-        const resolvedMetrics = metrics ?? this.getRichTextMetrics(text, style, state.metricCache);
+        const resolvedMetrics =
+            metrics ?? this.getRichTextCommandMetrics(text, style, state.metricCache, image);
         const cmdHeight = Math.max(resolvedMetrics.height, 1);
         const cmd: MsdfRichTextCommand = {
             text,
             style,
             link: link ?? null,
             clickable: !!clickable,
+            image: image ?? null,
             x: state.lineX,
             y: 0,
             width: resolvedMetrics.width,
@@ -4235,6 +4404,10 @@ export class MsdfText extends Laya.Text {
         metricCache: MsdfRichTextMetricCache
     ): boolean {
         // 把一个命令从中间切开，常用于把过长的单词或片段拆到下一行。
+        if (cmd.image) {
+            return false;
+        }
+
         const code = cmd.text.charCodeAt(pos);
         if (isLowSurrogate(code)) {
             pos--;
@@ -4334,6 +4507,11 @@ export class MsdfText extends Laya.Text {
 
         // 当前 run 放不下时，回溯当前行里已有的命令，尝试把整词一起挪到下一行。
         while (cmd) {
+            if (cmd.image) {
+                cmd = cmd.prev;
+                continue;
+            }
+
             if (cmd.width > 0) {
                 match = wordBoundaryTest.exec(cmd.text);
                 const textLen = cmd.text.length;
@@ -4867,7 +5045,11 @@ export class MsdfText extends Laya.Text {
         rectWidth: number,
         rectHeight: number,
         lastHeight: number,
-        getTextMetrics: (text: string, style: MsdfRichTextStyle) => MsdfRichTextMetrics,
+        getTextMetrics: (
+            text: string,
+            style: MsdfRichTextStyle,
+            image?: MsdfRichTextInlineImage | null
+        ) => MsdfRichTextMetrics,
         rebuildLine: (
             line: MsdfRichTextLine,
             segments: Array<{
@@ -4875,6 +5057,7 @@ export class MsdfText extends Laya.Text {
                 style: MsdfRichTextStyle;
                 link?: string | null;
                 clickable?: boolean;
+                image?: MsdfRichTextInlineImage | null;
             }>,
             fallbackHeight: number
         ) => void,
@@ -4908,12 +5091,13 @@ export class MsdfText extends Laya.Text {
         const segments: MsdfRichTextLineSegment[] = [];
         let cmd = lastLine.cmd;
         while (cmd) {
-            const metrics = getTextMetrics(cmd.text, cmd.style);
+            const metrics = getTextMetrics(cmd.text, cmd.style, cmd.image);
             segments.push({
                 text: cmd.text,
                 style: cmd.style,
                 link: cmd.link ?? null,
                 clickable: !!cmd.clickable,
+                image: cmd.image ?? null,
                 width: metrics.width,
                 height: metrics.height,
             });
@@ -4953,7 +5137,7 @@ export class MsdfText extends Laya.Text {
         }
 
         const ellipsisStyle = segments[segments.length - 1]?.style ?? fallbackStyle;
-        if (segments.length > 0) {
+        if (segments.length > 0 && !segments[segments.length - 1].image) {
             const tail = segments[segments.length - 1];
             tail.text += ELLIPSIS_TEXT;
             const mergedMetrics = getTextMetrics(tail.text, tail.style);
@@ -4966,6 +5150,7 @@ export class MsdfText extends Laya.Text {
                 style: ellipsisStyle,
                 link: null,
                 clickable: false,
+                image: null,
                 width: ellipsisMetrics.width,
                 height: ellipsisMetrics.height,
             });
@@ -4978,6 +5163,7 @@ export class MsdfText extends Laya.Text {
                 style: segment.style,
                 link: segment.link ?? null,
                 clickable: !!segment.clickable,
+                image: segment.image ?? null,
             })),
             font.getLineHeight(fallbackStyle.fontSize) || lastHeight
         );
@@ -5088,12 +5274,13 @@ export class MsdfText extends Laya.Text {
         this.graphics.clear(true);
         this.drawBg();
 
-        if (this._drawBatches.length === 0) {
-            this.syncMaterial();
+        if (this._drawBatches.length === 0 && this._richTextImageDraws.length === 0) {
             return;
         }
 
-        this.syncMaterial();
+        if (this._drawBatches.length > 0) {
+            this.syncMaterial();
+        }
 
         const needsClip = this._overflow === "hidden" || this._overflow === "scroll";
         const clipWidth =
@@ -5120,6 +5307,7 @@ export class MsdfText extends Laya.Text {
         const drawOffsetY = this._viewFrame.drawOffsetY;
 
         this.drawCurrentBatches(drawOffsetX, drawOffsetY);
+        this.drawCurrentInlineImages(drawOffsetX, drawOffsetY);
 
         if (clipped) {
             this.graphics.restore();
@@ -5138,6 +5326,18 @@ export class MsdfText extends Laya.Text {
                     drawOffsetY,
                     batch
                 )
+            );
+        }
+    }
+
+    private drawCurrentInlineImages(drawOffsetX: number, drawOffsetY: number): void {
+        for (const imageDraw of this._richTextImageDraws) {
+            this.graphics.drawImage(
+                imageDraw.texture,
+                drawOffsetX + imageDraw.x,
+                drawOffsetY + imageDraw.y,
+                imageDraw.width,
+                imageDraw.height
             );
         }
     }
@@ -5161,18 +5361,64 @@ export class MsdfText extends Laya.Text {
         }
     }
 
+    private appendRichTextInlineImage(
+        state: MsdfRichTextLayoutState,
+        image: MsdfRichTextInlineImage,
+        style: MsdfRichTextStyle,
+        wordWrap: boolean,
+        link?: string | null,
+        clickable?: boolean
+    ): void {
+        const metrics: MsdfRichTextMetrics = {
+            width: image.width,
+            height: image.height,
+        };
+
+        if (
+            wordWrap &&
+            state.rectWidth < Number.MAX_VALUE &&
+            state.lineX > 0 &&
+            metrics.width > state.rectWidth - state.lineX
+        ) {
+            this.advanceRichTextLine(state);
+        }
+
+        this.appendRichTextCommand(
+            state,
+            INLINE_IMAGE_PLACEHOLDER,
+            style,
+            metrics,
+            link,
+            clickable,
+            image
+        );
+    }
+
     private appendRichTextRunSegments(
         state: MsdfRichTextLayoutState,
         run: MsdfRichTextRun,
         wordWrap: boolean
     ): void {
+        const metadata = run as MsdfRichTextRun & MsdfRichTextRunMetadata;
+
+        if (metadata.image) {
+            this.appendRichTextInlineImage(
+                state,
+                metadata.image,
+                run.style,
+                wordWrap,
+                metadata.link ?? null,
+                !!metadata.clickable
+            );
+            return;
+        }
+
         if (!run.text) {
             return;
         }
 
         state.lastHeight = this.getRichTextRenderMetrics(run.style, state.metricCache).height;
         const splitLines = run.text.split("\n");
-        const metadata = run as MsdfRichTextRun & MsdfRichTextRunMetadata;
 
         for (let i = 0, n = splitLines.length; i < n; i++) {
             this.appendRichTextLineText(
@@ -5198,7 +5444,8 @@ export class MsdfText extends Laya.Text {
             state.rectWidth,
             state.rectHeight,
             state.lastHeight,
-            (text, style) => this.getRichTextMetrics(text, style, state.metricCache),
+            (text, style, image) =>
+                this.getRichTextCommandMetrics(text, style, state.metricCache, image),
             (line, segments, fallbackHeight) =>
                 this.rebuildRichTextLine(line, segments, fallbackHeight, state.metricCache),
             () => this.getRichTextFallbackStyle()
@@ -5214,7 +5461,9 @@ export class MsdfText extends Laya.Text {
         let text = "";
         let cmd = line.cmd;
         while (cmd) {
-            text += cmd.text;
+            if (!cmd.image) {
+                text += cmd.text;
+            }
             cmd = cmd.next;
         }
         return text;
@@ -5348,6 +5597,7 @@ export class MsdfText extends Laya.Text {
     private appendRichTextLineBatches(
         drawBatches: MsdfDrawBatch[],
         pendingGroup: MsdfDrawBatchGroup | null,
+        imageDraws: MsdfRichTextImageDraw[],
         line: MsdfRichTextLine,
         contentBoxWidth: number,
         scrollOffsetX: number,
@@ -5361,15 +5611,27 @@ export class MsdfText extends Laya.Text {
         while (cmd) {
             const x = lineOffsetX + cmd.x * shrinkScale - scrollOffsetX;
             const y = (line.y + cmd.y) * shrinkScale - scrollOffsetY;
+            const width = cmd.width * shrinkScale;
+            const height = cmd.height * shrinkScale;
+
+            if (cmd.image) {
+                if (isUsableTexture(cmd.image.texture) && width > 0 && height > 0) {
+                    imageDraws.push({
+                        texture: cmd.image.texture,
+                        x,
+                        y,
+                        width,
+                        height,
+                    });
+                }
+                this.recordRichTextClickArea(cmd, x, y, width, height);
+                cmd = cmd.next;
+                continue;
+            }
+
             const batch = this.buildRunBatch(cmd, x, y, layoutCache, shrinkScale);
             if (batch) {
-                this.recordRichTextClickArea(
-                    cmd,
-                    x,
-                    y,
-                    cmd.width * shrinkScale,
-                    cmd.height * shrinkScale
-                );
+                this.recordRichTextClickArea(cmd, x, y, width, height);
                 pendingGroup = this.appendMergedBatch(drawBatches, pendingGroup, batch);
             }
             cmd = cmd.next;
@@ -5378,12 +5640,13 @@ export class MsdfText extends Laya.Text {
         return pendingGroup;
     }
 
-    private buildRichTextDrawBatches(
+    private buildRichTextDrawData(
         lines: MsdfRichTextLine[],
         shrinkScale: number
-    ): MsdfDrawBatch[] {
+    ): MsdfRichTextDrawData {
         const contentBoxWidth = this._layoutWidth >= 0 ? this._layoutWidth : this._contentWidth;
         const drawBatches: MsdfDrawBatch[] = [];
+        const imageDraws: MsdfRichTextImageDraw[] = [];
         this.clearRichTextClickAreas();
         // 富文本里同样的“文本片段 + 样式”组合可能重复出现。
         // 先缓存每个 run 的布局，再把可合并的 run 拼成更大的 GPU batch。
@@ -5396,6 +5659,7 @@ export class MsdfText extends Laya.Text {
             pendingGroup = this.appendRichTextLineBatches(
                 drawBatches,
                 pendingGroup,
+                imageDraws,
                 line,
                 contentBoxWidth,
                 scrollOffsetX,
@@ -5406,7 +5670,10 @@ export class MsdfText extends Laya.Text {
         }
 
         appendBatchGroup(drawBatches, pendingGroup);
-        return drawBatches;
+        return {
+            drawBatches,
+            imageDraws,
+        };
     }
 
     private createRichTextBatchStyleData(
@@ -5510,6 +5777,10 @@ export class MsdfText extends Laya.Text {
         layoutCache?: MsdfRichTextLayoutCache,
         shrinkScale: number = 1
     ): MsdfDrawBatch | null {
+        if (cmd.image) {
+            return null;
+        }
+
         const style = cmd.style;
         const layout = this.getRichTextCommandLayout(cmd, layoutCache);
         if (layout.indices.length === 0) {

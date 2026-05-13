@@ -7,6 +7,7 @@ const MSDF_SHADER_URL = "resources/shader/MsdfText.shader";
 const MSDF_ATLAS_URL = "resources/font/SourceHanSans.png";
 const MSDF_JSON_URL = "resources/font/SourceHanSans.json";
 const NATIVE_FONT_URL = "resources/source-han-sans-cn-medium.ttf";
+const GOLD_ICON_URL = "resources/img_icon_item_gold.png";
 const CARD_WIDTH = 492;
 const CARD_HEIGHT = 340;
 const RICH_TEXT_CARD_HEIGHT = 420;
@@ -577,6 +578,42 @@ export class Main extends Laya.Script {
                             return label;
                         },
                     },
+                    {
+                        id: "D3",
+                        title: "ubb inline image",
+                        note: "使用金币图验证 [img]...[/img] 的行内图片布局、换行和资源异步加载后的自动刷新。",
+                        cardHeight: RICH_TEXT_CARD_HEIGHT,
+                        buildMsdf: () => {
+                            const label = this.createMsdfLabel(this.createUbbImageSampleText());
+                            label.font = "demo-msdf";
+                            label.fontSize = 24;
+                            label.ubb = true;
+                            label.wordWrap = true;
+                            label.width = 300;
+                            label.leading = 8;
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            label.stroke = 1.5;
+                            label.strokeColor = "#7a5d18";
+                            return label;
+                        },
+                        buildNative: () => {
+                            const label = this.createNativeLabel(this.createUbbImageSampleText());
+                            label.font = NATIVE_FONT_URL;
+                            label.fontSize = 24;
+                            label.ubb = true;
+                            label.wordWrap = true;
+                            label.width = 300;
+                            label.leading = 8;
+                            label.padding = "10,12,10,12";
+                            label.bgColor = "#16263a";
+                            label.borderColor = "#35506d";
+                            label.stroke = 1.5;
+                            label.strokeColor = "#7a5d18";
+                            return label;
+                        },
+                    },
                 ],
             },
         ];
@@ -826,6 +863,16 @@ export class Main extends Laya.Script {
             "<p><i>第一阶段：</i><a href='msdf://mission-file'><u>封锁入口文件</u></a> <u>备用文件</u><br />第二阶段：保持阵型</p>" +
             "<p><li>前排吸收伤害</li><li>后排集中输出</li></p>" +
             "<span>剩余时间&nbsp;00:18</span>"
+        );
+    }
+
+    private createUbbImageSampleText(): string {
+        return (
+            "[size=28][color=#ffe082][b]战利品预览[/b][/color][/size]\n" +
+            "领取奖励 [img]" +
+            GOLD_ICON_URL +
+            "[/img] [size=30][color=#ffd54f][b]x 1200[/b][/color][/size]\n" +
+            "[size=22][color=#bde7ff]图片应保持原始尺寸插入正文，资源异步加载后也要自动补画。[/color][/size]"
         );
     }
 
