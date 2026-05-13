@@ -466,6 +466,17 @@ type MsdfRichTextShrinkCandidate = {
     fillScore: number;
 };
 
+type MsdfPlainTextShrinkCandidate = {
+    layoutText: string;
+    layout: MsdfLayout;
+    contentWidth: number;
+    contentHeight: number;
+    widthScale: number;
+    heightScale: number;
+    scale: number;
+    fillScore: number;
+};
+
 type MsdfRichTextLayoutCache = WeakMap<MsdfRichTextStyle, Map<string, MsdfLayout>>;
 
 type MsdfTextRefreshResult = {
@@ -2356,6 +2367,7 @@ export class MsdfText extends Laya.Text {
         }
 
         this._overflow = next;
+        this._plainTextLayoutDirty = true;
         this.refresh();
     }
 
@@ -3801,13 +3813,31 @@ export class MsdfText extends Laya.Text {
         return this._isWidthSet ? this.width : 0;
     }
 
-    private resolvePlainTextLayoutText(font: MsdfBitmapFont): string {
-        const wrapWidth = this.resolveActiveWrapWidth();
-        if (wrapWidth <= 0) {
+    private resolvePlainTextLayoutText(font: MsdfBitmapFont, wrapWidth?: number): string {
+        const resolvedWrapWidth = wrapWidth ?? this.resolveActiveWrapWidth();
+        if (resolvedWrapWidth <= 0) {
             return this._plainText;
         }
 
-        return font.wrapText(this._plainText, this._fontSize, wrapWidth, this._letterSpacing);
+        return font.wrapText(
+            this._plainText,
+            this._fontSize,
+            resolvedWrapWidth,
+            this._letterSpacing
+        );
+    }
+
+    private buildPlainTextLayout(font: MsdfBitmapFont, layoutText: string): MsdfLayout {
+        return font.buildLayout(
+            layoutText,
+            this._fontSize,
+            this._letterSpacing,
+            this._lineSpacing,
+            {
+                underline: this._underline,
+                strikethrough: this._strikethrough,
+            }
+        );
     }
 
     private getPlainTextLayout(): MsdfLayout {
@@ -3815,16 +3845,7 @@ export class MsdfText extends Laya.Text {
         const font = this.requireFont();
         if (this._plainTextLayoutDirty) {
             const layoutText = this.resolvePlainTextLayoutText(font);
-            this._layout = font.buildLayout(
-                layoutText,
-                this._fontSize,
-                this._letterSpacing,
-                this._lineSpacing,
-                {
-                    underline: this._underline,
-                    strikethrough: this._strikethrough,
-                }
-            );
+            this._layout = this.buildPlainTextLayout(font, layoutText);
             this._plainTextLayoutDirty = false;
             this.invalidatePlainTextBatchCache();
         }
@@ -4086,6 +4107,7 @@ export class MsdfText extends Laya.Text {
     }
 
     private buildPlainTextLineMetrics(
+        layoutText: string,
         shrinkScale: number,
         contentBoxWidth: number
     ): MsdfTextLineMetric[] {
@@ -4094,7 +4116,6 @@ export class MsdfText extends Laya.Text {
         }
 
         const font = this.requireFont();
-        const layoutText = this.resolvePlainTextLayoutText(font);
 
         return layoutText.split("\n").map((lineText, index) => {
             const line = this._layout.lineInfos[index];
@@ -4180,16 +4201,171 @@ export class MsdfText extends Laya.Text {
         ];
     }
 
+    private evaluatePlainTextShrinkCandidate(
+        font: MsdfBitmapFont,
+        wrapWidth: number,
+        widthLimit: number,
+        heightLimit: number
+    ): MsdfPlainTextShrinkCandidate {
+        const layoutText = this.resolvePlainTextLayoutText(font, wrapWidth);
+        const layout = this.buildPlainTextLayout(font, layoutText);
+        const contentWidth = layout.width;
+        const contentHeight = layout.height;
+        const widthScale = contentWidth > 0 ? Math.min(widthLimit / contentWidth, 1) : 1;
+        const heightScale = contentHeight > 0 ? Math.min(heightLimit / contentHeight, 1) : 1;
+        const scale = Math.min(widthScale, heightScale);
+
+        return {
+            layoutText,
+            layout,
+            contentWidth,
+            contentHeight,
+            widthScale,
+            heightScale,
+            scale,
+            fillScore: (contentWidth * scale) / widthLimit + (contentHeight * scale) / heightLimit,
+        };
+    }
+
+    private pickBetterPlainTextShrinkCandidate(
+        left: MsdfPlainTextShrinkCandidate,
+        right: MsdfPlainTextShrinkCandidate,
+        scaleEpsilon: number
+    ): MsdfPlainTextShrinkCandidate {
+        if (right.scale > left.scale + scaleEpsilon) {
+            return right;
+        }
+
+        if (
+            Math.abs(right.scale - left.scale) <= scaleEpsilon &&
+            right.fillScore > left.fillScore
+        ) {
+            return right;
+        }
+
+        return left;
+    }
+
+    private isPlainTextShrinkCandidateBalanced(
+        candidate: MsdfPlainTextShrinkCandidate,
+        scaleEpsilon: number
+    ): boolean {
+        return candidate.widthScale <= candidate.heightScale + scaleEpsilon;
+    }
+
+    private searchBetterPlainTextShrinkCandidate(
+        font: MsdfBitmapFont,
+        initialBest: MsdfPlainTextShrinkCandidate,
+        originalWrapWidth: number,
+        widthLimit: number,
+        heightLimit: number,
+        scaleEpsilon: number,
+        balanceEpsilon: number
+    ): MsdfPlainTextShrinkCandidate {
+        let best = initialBest;
+        let leftWidth = originalWrapWidth;
+        let rightWidth = originalWrapWidth;
+        let rightCandidate = initialBest;
+
+        for (let i = 0; i < 3; i++) {
+            rightWidth *= 2;
+            rightCandidate = this.evaluatePlainTextShrinkCandidate(
+                font,
+                rightWidth,
+                widthLimit,
+                heightLimit
+            );
+            best = this.pickBetterPlainTextShrinkCandidate(best, rightCandidate, scaleEpsilon);
+            if (
+                this.isPlainTextShrinkCandidateBalanced(rightCandidate, scaleEpsilon) ||
+                rightCandidate.scale >= 1 - scaleEpsilon
+            ) {
+                break;
+            }
+        }
+
+        if (!this.isPlainTextShrinkCandidateBalanced(rightCandidate, scaleEpsilon)) {
+            return best;
+        }
+
+        for (let i = 0; i < 4; i++) {
+            const midWidth = (leftWidth + rightWidth) * 0.5;
+            const midCandidate = this.evaluatePlainTextShrinkCandidate(
+                font,
+                midWidth,
+                widthLimit,
+                heightLimit
+            );
+            best = this.pickBetterPlainTextShrinkCandidate(best, midCandidate, scaleEpsilon);
+
+            if (
+                Math.abs(midCandidate.widthScale - midCandidate.heightScale) <= balanceEpsilon ||
+                midCandidate.scale >= 1 - scaleEpsilon ||
+                rightWidth - leftWidth <= 1
+            ) {
+                break;
+            }
+
+            if (midCandidate.widthScale > midCandidate.heightScale + scaleEpsilon) {
+                leftWidth = midWidth;
+            } else {
+                rightWidth = midWidth;
+            }
+        }
+
+        return best;
+    }
+
+    private resolvePlainTextShrinkCandidate(font: MsdfBitmapFont): MsdfPlainTextShrinkCandidate {
+        const activeWrapWidth = this.resolveActiveWrapWidth();
+        const widthLimit = activeWrapWidth;
+        const heightLimit = this._layoutHeight;
+        const scaleEpsilon = 0.0001;
+        const balanceEpsilon = 0.02;
+        let best = this.evaluatePlainTextShrinkCandidate(
+            font,
+            activeWrapWidth,
+            widthLimit,
+            heightLimit
+        );
+
+        if (best.widthScale > best.heightScale + scaleEpsilon) {
+            best = this.searchBetterPlainTextShrinkCandidate(
+                font,
+                best,
+                activeWrapWidth,
+                widthLimit,
+                heightLimit,
+                scaleEpsilon,
+                balanceEpsilon
+            );
+        }
+
+        return best;
+    }
+
     private buildPlainTextRefreshResult(): MsdfTextRefreshResult {
         this.clearRichTextClickAreas();
-        this._layout = this.getPlainTextLayout();
+        const font = this.requireFont();
+        const activeWrapWidth = this.resolveActiveWrapWidth();
+        let layoutText: string;
+
+        if (this._overflow === "shrink" && activeWrapWidth > 0 && this._layoutHeight > 0) {
+            const shrinkCandidate = this.resolvePlainTextShrinkCandidate(font);
+            layoutText = shrinkCandidate.layoutText;
+            this._layout = shrinkCandidate.layout;
+        } else {
+            this._layout = this.getPlainTextLayout();
+            layoutText = this.resolvePlainTextLayoutText(font);
+        }
+
         const shrinkScale = this.resolveShrinkScale(this._layout.width, this._layout.height);
         const contentBoxWidth = this.resolvePlainTextContentBoxWidth(shrinkScale);
 
         return {
             contentWidth: this._layout.width * shrinkScale,
             contentHeight: this._layout.height * shrinkScale,
-            lines: this.buildPlainTextLineMetrics(shrinkScale, contentBoxWidth),
+            lines: this.buildPlainTextLineMetrics(layoutText, shrinkScale, contentBoxWidth),
             drawBatches: this.buildPlainTextDrawBatches(shrinkScale),
             layout: this._layout,
         };
