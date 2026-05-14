@@ -16,9 +16,13 @@ type FontGlyph = Rect & {
     id?: number;
     index?: number;
     char: string;
-    xoffset: number;
-    yoffset: number;
     xadvance: number;
+    metrics?: {
+        left: number;
+        top: number;
+        right: number;
+        bottom: number;
+    };
     chnl?: number;
     page?: number;
 };
@@ -51,11 +55,11 @@ type PngModule = {
     };
 };
 
-type DecorationGlyphMetrics = {
+type DecorationGlyphLayout = {
     width: number;
     height: number;
-    xoffset: number;
-    yoffset: number;
+    left: number;
+    top: number;
     xadvance: number;
 };
 
@@ -174,20 +178,20 @@ function findReusableSlot(
     return null;
 }
 
-function getDecorationGlyphMetrics(fontJson: FontJson): DecorationGlyphMetrics {
+function getDecorationGlyphMetrics(fontJson: FontJson): DecorationGlyphLayout {
     const lineHeight = Math.max(1, Number(fontJson.common?.lineHeight) || 25);
     const overhang = Math.max(1, Math.round(lineHeight * 0.08));
     const height = 1;
     const xadvance = Math.max(overhang * 2 + 1, Math.round(lineHeight * 0.56));
     const width = xadvance + overhang * 2;
     const centerY = lineHeight - Math.max(1, Math.round(lineHeight * 0.04));
-    const yoffset = Math.max(0, Math.round(centerY - height * 0.5));
+    const top = Math.max(0, Math.round(centerY - height * 0.5));
 
     return {
         width,
         height,
-        xoffset: -overhang,
-        yoffset,
+        left: -overhang,
+        top,
         xadvance,
     };
 }
@@ -272,9 +276,13 @@ export function injectDecorationGlyph({ texturePath, jsonPath }: DecorationGlyph
         char: DECORATION_GLYPH_CHAR,
         width: glyphMetrics.width,
         height: glyphMetrics.height,
-        xoffset: glyphMetrics.xoffset,
-        yoffset: glyphMetrics.yoffset,
         xadvance: glyphMetrics.xadvance,
+        metrics: {
+            left: glyphMetrics.left,
+            top: glyphMetrics.top,
+            right: glyphMetrics.left + glyphMetrics.width,
+            bottom: glyphMetrics.top + glyphMetrics.height,
+        },
         chnl: GLYPH_CHANNEL_MASK,
         x: glyphX,
         y: glyphY,

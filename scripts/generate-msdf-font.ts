@@ -1,10 +1,85 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { injectDecorationGlyph } from "./msdf-decoration.js";
+
+type FontGlyphMetrics = {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+};
+
+type FontGlyph = {
+    char: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    xadvance: number;
+    xoffset?: number;
+    yoffset?: number;
+    metrics?: FontGlyphMetrics;
+};
+
+type FontJson = {
+    chars?: FontGlyph[];
+};
+
+type OpenTypeBoundingBox = {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+};
+
+type OpenTypePath = {
+    getBoundingBox(): OpenTypeBoundingBox;
+};
+
+type OpenTypeGlyph = {
+    getPath(x: number, y: number, fontSize: number): OpenTypePath;
+};
+
+type OpenTypeFont = {
+    unitsPerEm: number;
+    tables: {
+        os2: {
+            sTypoAscender: number;
+        };
+    };
+    charToGlyph(char: string): OpenTypeGlyph;
+};
+
+type OpenTypeModule = {
+    loadSync(path: string): OpenTypeFont;
+};
+
+type PngImage = {
+    width: number;
+    height: number;
+    data: Uint8Array;
+};
+
+type PngModule = {
+    PNG: {
+        sync: {
+            read(source: Buffer): PngImage;
+        };
+    };
+};
+
+const require = createRequire(import.meta.url);
+const opentype = require("opentype.js") as OpenTypeModule;
+const { PNG } = require("pngjs") as PngModule;
+const METRIC_PRECISION = 4;
+const DIGIT_CHARS = "0123456789";
+const MSDF_VISIBLE_MIN = 5;
+const MSDF_VISIBLE_MAX = 250;
 
 function printHelp(): void {
     console.log(`Usage:
@@ -37,6 +112,175 @@ function hasArg(name: string): boolean {
     return process.argv.includes(name);
 }
 
+function roundMetric(value: number): number {
+    return Math.round(value * 10 ** METRIC_PRECISION) / 10 ** METRIC_PRECISION;
+}
+
+function injectGlyphMetrics(
+    fontPath: string,
+    jsonPath: string,
+    fontSize: number,
+    distanceRange: number
+): void {
+    const fontJson = JSON.parse(readFileSync(jsonPath, "utf8")) as FontJson;
+    const glyphs = fontJson.chars;
+    if (!Array.isArray(glyphs) || glyphs.length === 0) {
+        return;
+    }
+
+    const font = opentype.loadSync(fontPath);
+    const baseline = font.tables.os2.sTypoAscender * (fontSize / font.unitsPerEm);
+    const pad = Math.floor(distanceRange / 2);
+
+    for (const glyph of glyphs) {
+        if (!glyph.char || glyph.width <= 0 || glyph.height <= 0) {
+            continue;
+        }
+
+        const bounds = font.charToGlyph(glyph.char).getPath(0, 0, fontSize).getBoundingBox();
+        if (
+            !Number.isFinite(bounds.x1) ||
+            !Number.isFinite(bounds.y1) ||
+            !Number.isFinite(bounds.x2) ||
+            !Number.isFinite(bounds.y2)
+        ) {
+            continue;
+        }
+
+        glyph.metrics = {
+            left: roundMetric(bounds.x1 - pad),
+            top: roundMetric(bounds.y1 - pad + baseline),
+            right: roundMetric(bounds.x2 + pad),
+            bottom: roundMetric(bounds.y2 + pad + baseline),
+        };
+    }
+
+    writeFileSync(jsonPath, `${JSON.stringify(fontJson, null, 4)}\n`);
+}
+
+function median3(a: number, b: number, c: number): number {
+    if (a > b) {
+        [a, b] = [b, a];
+    }
+    if (b > c) {
+        [b, c] = [c, b];
+    }
+    if (a > b) {
+        [a, b] = [b, a];
+    }
+
+    return b;
+}
+
+function detectGlyphVisibleRowRange(
+    atlas: PngImage,
+    glyph: FontGlyph
+): { firstRow: number; lastRow: number } | null {
+    let firstRow = -1;
+    let lastRow = -1;
+
+    for (let row = 0; row < glyph.height; row++) {
+        let hasVisiblePixel = false;
+
+        for (let col = 0; col < glyph.width; col++) {
+            const pixelOffset = ((glyph.y + row) * atlas.width + (glyph.x + col)) * 4;
+            const distance = median3(
+                atlas.data[pixelOffset],
+                atlas.data[pixelOffset + 1],
+                atlas.data[pixelOffset + 2]
+            );
+
+            if (distance > MSDF_VISIBLE_MIN && distance < MSDF_VISIBLE_MAX) {
+                hasVisiblePixel = true;
+                break;
+            }
+        }
+
+        if (!hasVisiblePixel) {
+            continue;
+        }
+
+        if (firstRow < 0) {
+            firstRow = row;
+        }
+        lastRow = row;
+    }
+
+    if (firstRow < 0 || lastRow < firstRow) {
+        return null;
+    }
+
+    return { firstRow, lastRow };
+}
+
+function normalizeDigitRasterMetrics(texturePath: string, jsonPath: string): void {
+    const fontJson = JSON.parse(readFileSync(jsonPath, "utf8")) as FontJson;
+    const glyphs = fontJson.chars;
+    if (!Array.isArray(glyphs) || glyphs.length === 0) {
+        return;
+    }
+
+    const atlas = PNG.sync.read(readFileSync(texturePath));
+
+    for (const glyph of glyphs) {
+        if (!DIGIT_CHARS.includes(glyph.char) || glyph.width <= 0 || glyph.height <= 0) {
+            continue;
+        }
+
+        const visibleRows = detectGlyphVisibleRowRange(atlas, glyph);
+        if (!visibleRows) {
+            continue;
+        }
+
+        const nextY = glyph.y + visibleRows.firstRow;
+        const nextHeight = visibleRows.lastRow - visibleRows.firstRow + 1;
+
+        if (nextY !== glyph.y || nextHeight !== glyph.height) {
+            glyph.y = nextY;
+            glyph.height = nextHeight;
+        }
+
+        if (glyph.metrics && typeof glyph.yoffset === "number" && Number.isFinite(glyph.yoffset)) {
+            const yoffset = glyph.yoffset;
+            glyph.metrics.top = yoffset;
+            glyph.metrics.bottom = yoffset + glyph.height;
+        }
+    }
+
+    writeFileSync(jsonPath, `${JSON.stringify(fontJson, null, 4)}\n`);
+}
+
+function finalizeGlyphMetrics(jsonPath: string): void {
+    const fontJson = JSON.parse(readFileSync(jsonPath, "utf8")) as FontJson;
+    const glyphs = fontJson.chars;
+    if (!Array.isArray(glyphs) || glyphs.length === 0) {
+        return;
+    }
+
+    for (const glyph of glyphs) {
+        const xoffset =
+            typeof glyph.xoffset === "number" && Number.isFinite(glyph.xoffset)
+                ? glyph.xoffset
+                : 0;
+        const yoffset =
+            typeof glyph.yoffset === "number" && Number.isFinite(glyph.yoffset)
+                ? glyph.yoffset
+                : 0;
+
+        glyph.metrics ??= {
+            left: xoffset,
+            top: yoffset,
+            right: xoffset + glyph.width,
+            bottom: yoffset + glyph.height,
+        };
+
+        delete glyph.xoffset;
+        delete glyph.yoffset;
+    }
+
+    writeFileSync(jsonPath, `${JSON.stringify(fontJson, null, 4)}\n`);
+}
+
 if (hasArg("--help")) {
     printHelp();
     process.exit(0);
@@ -56,11 +300,15 @@ const textureOut = resolve(getArg("--texture-out") ?? "assets/resources/msdf/msd
 const jsonOut = resolve(
     getArg("--json-out") ?? "assets/resources/msdf/source-han-sans-cn-medium.json"
 );
-const fontSize = getArg("--font-size") ?? "56";
+const fontSizeArg = getArg("--font-size") ?? "56";
 const textureSize = getArg("--texture-size") ?? "2048,2048";
 const padding = getArg("--padding") ?? "4";
-const distanceRange = getArg("--distance-range") ?? "6";
+const distanceRangeArg = getArg("--distance-range") ?? "6";
 const fieldType = getArg("--field-type") ?? "msdf";
+const parsedFontSize = Number(fontSizeArg);
+const parsedDistanceRange = Number(distanceRangeArg);
+const fontSize = Number.isFinite(parsedFontSize) ? parsedFontSize : 56;
+const distanceRange = Number.isFinite(parsedDistanceRange) ? parsedDistanceRange : 6;
 
 mkdirSync(dirname(textureOut), { recursive: true });
 mkdirSync(dirname(jsonOut), { recursive: true });
@@ -83,11 +331,11 @@ const args = [
     "-m",
     textureSize,
     "-s",
-    fontSize,
+    String(fontSize),
     "-p",
     padding,
     "-r",
-    distanceRange,
+    String(distanceRange),
     "-t",
     fieldType,
     resolvedFont,
@@ -118,7 +366,10 @@ if (result.status !== 0) {
 try {
     copyFileSync(generatedTexture, textureOut);
     copyFileSync(generatedJson, jsonOut);
+    injectGlyphMetrics(resolvedFont, jsonOut, fontSize, distanceRange);
+    normalizeDigitRasterMetrics(textureOut, jsonOut);
     injectDecorationGlyph({ texturePath: textureOut, jsonPath: jsonOut });
+    finalizeGlyphMetrics(jsonOut);
 } finally {
     rmSync(tmpRoot, { recursive: true, force: true });
 }

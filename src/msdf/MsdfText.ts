@@ -1,11 +1,17 @@
+type MsdfGlyphMetrics = {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+};
+
 type MsdfGlyph = {
     id: number;
     char: string;
     width: number;
     height: number;
-    xoffset: number;
-    yoffset: number;
     xadvance: number;
+    metrics: MsdfGlyphMetrics;
     x: number;
     y: number;
     page: number;
@@ -1178,6 +1184,22 @@ function kerningKey(first: number, second: number): number {
     return first * KERNING_KEY_MULTIPLIER + second;
 }
 
+function hasFiniteGlyphMetrics(
+    metrics: MsdfGlyphMetrics | null | undefined
+): metrics is MsdfGlyphMetrics {
+    return (
+        !!metrics &&
+        Number.isFinite(metrics.left) &&
+        Number.isFinite(metrics.top) &&
+        Number.isFinite(metrics.right) &&
+        Number.isFinite(metrics.bottom)
+    );
+}
+
+function resolveGlyphMetrics(glyph: MsdfGlyph): MsdfGlyphMetrics {
+    return glyph.metrics;
+}
+
 function normalizeFontJson(raw: unknown): MsdfFontJson {
     let data = raw;
 
@@ -1352,6 +1374,10 @@ export class MsdfBitmapFont {
         this.distanceRange = data.distanceField?.distanceRange ?? 4;
 
         for (const glyph of data.chars) {
+            if (!hasFiniteGlyphMetrics(glyph.metrics)) {
+                const glyphLabel = glyph.char || `U+${glyph.id.toString(16).toUpperCase()}`;
+                throw new Error(`Invalid MSDF glyph metrics for ${glyphLabel}.`);
+            }
             this.glyphs.set(glyph.char, glyph);
         }
 
@@ -1420,24 +1446,23 @@ export class MsdfBitmapFont {
         }
 
         const scale = fontSize / this.lineHeight;
-        const baseThickness = Math.max(1, Math.ceil(this.decorationGlyph.height * scale));
+        const glyphMetrics = resolveGlyphMetrics(this.decorationGlyph);
+        const glyphHeight = Math.max(0, glyphMetrics.bottom - glyphMetrics.top);
+        const baseThickness = Math.max(1, Math.ceil(glyphHeight * scale));
         const thickness =
             scale >= LARGE_DECORATION_SCALE_THRESHOLD
                 ? baseThickness + LARGE_DECORATION_THICKNESS_BOOST
                 : baseThickness;
-        const leftOverhang = Math.min(0, this.decorationGlyph.xoffset * scale);
+        const leftOverhang = Math.min(0, glyphMetrics.left * scale);
         const rightOverhang = Math.max(
             0,
-            (this.decorationGlyph.xoffset +
-                this.decorationGlyph.width -
-                this.decorationGlyph.xadvance) *
-                scale
+            (glyphMetrics.right - this.decorationGlyph.xadvance) * scale
         );
         const underlineOffset = Math.max(
             UNDERLINE_EXTRA_OFFSET_MIN,
             scale * UNDERLINE_EXTRA_OFFSET_SCALE
         );
-        const underlineTop = Math.round(this.decorationGlyph.yoffset * scale + underlineOffset);
+        const underlineTop = Math.round(glyphMetrics.top * scale + underlineOffset);
 
         return {
             leftOverhang,
@@ -1612,10 +1637,11 @@ export class MsdfBitmapFont {
                 penX += (this.kernings.get(kerningKey(previousCode, glyph.id)) ?? 0) * scale;
             }
 
-            const left = penX + glyph.xoffset * scale;
-            const top = penY + glyph.yoffset * scale;
-            const right = left + glyph.width * scale;
-            const bottom = top + glyph.height * scale;
+            const metrics = resolveGlyphMetrics(glyph);
+            const left = penX + metrics.left * scale;
+            const top = penY + metrics.top * scale;
+            const right = penX + metrics.right * scale;
+            const bottom = penY + metrics.bottom * scale;
             const line = lineInfos[lineIndex];
 
             line.left = Math.min(line.left, left);
@@ -1741,7 +1767,13 @@ export class MsdfBitmapFont {
             lineInfos: normalizedLineInfos,
             quadLineIndices: new Uint16Array(quadLineIndices),
             width: Math.max(widestLine, boundsWidth),
-            height: Math.max(blockHeight, boundsHeight),
+            // 使用理论行高（blockHeight）而非字形实际边界（boundsHeight），
+            // 原因：boundsHeight 包含 MSDF SDF padding 以及超出 lineHeight 的字形
+            // bearing（如全角分号 ；BottomBearing > lineHeight），会导致高度
+            // 比富文本路径多约 4px，在 HTML/非HTML 模式之间造成不一致。
+            // blockHeight = N × lineHeight + (N-1) × lineSpacing
+            // 与富文本路径的 measureRichTextLines 保持一致。
+            height: blockHeight,
             boundsLeft,
             boundsTop,
             boundsRight,
@@ -3865,7 +3897,12 @@ export class MsdfText extends Laya.Text {
             {
                 underline: this._underline,
                 strikethrough: this._strikethrough,
-            }
+            },
+            // 不对 Y 做字形驱动的归一化：若以 minY 做 shiftY，不同字符集的
+            // top bearing 不同（汉字 ≈ -2，数字 ≈ +1），导致字符混排与纯数字
+            // 场景下同一行内容 Y 基准不一致（差约 3×scale px），出现视觉偏上/偏下。
+            // 统一以笔触起点（penY=0）为原点，与富文本路径保持一致。
+            { normalizeY: false }
         );
     }
 
