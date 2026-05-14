@@ -44,6 +44,10 @@ type MsdfLayout = {
     quadLineIndices: Uint16Array;
     width: number;
     height: number;
+    boundsLeft: number;
+    boundsTop: number;
+    boundsRight: number;
+    boundsBottom: number;
 };
 
 type MsdfDrawBatch = {
@@ -146,6 +150,11 @@ type MsdfPlainTextBatchCache = {
 type MsdfDecorationOptions = {
     underline?: boolean;
     strikethrough?: boolean;
+};
+
+type MsdfLayoutBuildOptions = {
+    normalizeX?: boolean;
+    normalizeY?: boolean;
 };
 
 type MsdfDecorationRenderMetrics = {
@@ -556,6 +565,10 @@ function createEmptyLayout(): MsdfLayout {
         quadLineIndices: new Uint16Array(0),
         width: 0,
         height: 0,
+        boundsLeft: 0,
+        boundsTop: 0,
+        boundsRight: 0,
+        boundsBottom: 0,
     };
 }
 
@@ -1493,10 +1506,13 @@ export class MsdfBitmapFont {
         fontSize: number,
         letterSpacing: number = 0,
         lineSpacing: number = 0,
-        decorations: MsdfDecorationOptions = {}
+        decorations: MsdfDecorationOptions = {},
+        options: MsdfLayoutBuildOptions = {}
     ): MsdfLayout {
         // 先把文本转换成可复用的四边形布局。这个阶段只负责生成本地字形几何，
         // 不处理裁剪、滚动、发光/阴影叠加顺序，也不关心最终屏幕上的偏移。
+        const normalizeX = options.normalizeX !== false;
+        const normalizeY = options.normalizeY !== false;
         const scale = fontSize / this.lineHeight;
         const scaledLetterSpacing = letterSpacing * scale;
         const vertices: number[] = [];
@@ -1668,6 +1684,9 @@ export class MsdfBitmapFont {
             }
         }
 
+        const hasQuads = quadCount > 0;
+        const shiftX = hasQuads && normalizeX && Number.isFinite(minX) ? minX : 0;
+        const shiftY = hasQuads && normalizeY && Number.isFinite(minY) ? minY : 0;
         const normalizedLineInfos = lineInfos.map((line) => {
             if (!Number.isFinite(line.left) || !Number.isFinite(line.right)) {
                 return {
@@ -1677,12 +1696,13 @@ export class MsdfBitmapFont {
             }
 
             return {
-                x: line.left - minX,
+                x: line.left - shiftX,
                 width: line.right - line.left,
             };
         });
+        const blockHeight = lineCount * lineHeight + Math.max(0, lineCount - 1) * lineSpacing;
 
-        if (quadCount === 0) {
+        if (!hasQuads) {
             return {
                 vertices: new Float32Array(0),
                 uvs: new Float32Array(0),
@@ -1691,17 +1711,25 @@ export class MsdfBitmapFont {
                 lineInfos: normalizedLineInfos,
                 quadLineIndices: new Uint16Array(0),
                 width: widestLine,
-                height: lineCount * lineHeight + Math.max(0, lineCount - 1) * lineSpacing,
+                height: blockHeight,
+                boundsLeft: 0,
+                boundsTop: 0,
+                boundsRight: 0,
+                boundsBottom: 0,
             };
         }
 
-        maxY = Math.max(maxY, lineCount * lineHeight + Math.max(0, lineCount - 1) * lineSpacing);
+        // 默认把布局归一化到文本块左上；富文本 run 会关闭这里的归一化，
+        // 等一整行 run 都排好以后再统一抵消 glyph bearing。
+        const boundsLeft = minX - shiftX;
+        const boundsTop = minY - shiftY;
+        const boundsRight = maxX - shiftX;
+        const boundsBottom = maxY - shiftY;
+        const boundsWidth = boundsRight - Math.min(0, boundsLeft);
+        const boundsHeight = boundsBottom - Math.min(0, boundsTop);
 
-        const shiftY = minY < 0 ? minY : 0;
-
-        // 把布局归一化到以文本块左上附近为原点，外部就能用一次整体偏移去放置它。
         for (let i = 0; i < vertices.length; i += 2) {
-            vertices[i] -= minX;
+            vertices[i] -= shiftX;
             vertices[i + 1] -= shiftY;
         }
 
@@ -1712,11 +1740,12 @@ export class MsdfBitmapFont {
             quadKinds: new Uint8Array(quadKinds),
             lineInfos: normalizedLineInfos,
             quadLineIndices: new Uint16Array(quadLineIndices),
-            width: Math.max(widestLine, maxX - minX),
-            height: Math.max(
-                lineCount * lineHeight + Math.max(0, lineCount - 1) * lineSpacing,
-                maxY - shiftY
-            ),
+            width: Math.max(widestLine, boundsWidth),
+            height: Math.max(blockHeight, boundsHeight),
+            boundsLeft,
+            boundsTop,
+            boundsRight,
+            boundsBottom,
         };
     }
 }
@@ -5782,11 +5811,12 @@ export class MsdfText extends Laya.Text {
         shrinkScale: number
     ): MsdfDrawBatchGroup | null {
         const lineOffsetX = this.resolveRichTextLineOffsetX(line, contentBoxWidth, shrinkScale);
+        const lineOriginShift = this.resolveRichTextLineOriginShift(line, layoutCache);
         let cmd = line.cmd;
 
         while (cmd) {
-            const x = lineOffsetX + cmd.x * shrinkScale - scrollOffsetX;
-            const y = (line.y + cmd.y) * shrinkScale - scrollOffsetY;
+            const x = lineOffsetX + (cmd.x - lineOriginShift.x) * shrinkScale - scrollOffsetX;
+            const y = (line.y + cmd.y - lineOriginShift.y) * shrinkScale - scrollOffsetY;
             const width = cmd.width * shrinkScale;
             const height = cmd.height * shrinkScale;
 
@@ -5935,15 +5965,54 @@ export class MsdfText extends Laya.Text {
 
         let layout = styleLayouts?.get(cmd.text);
         if (!layout) {
-            // 每个富文本 run 依然复用纯文本的 buildLayout，只是输入样式来自当前 run。
-            layout = font.buildLayout(cmd.text, style.fontSize, this._letterSpacing, 0, {
-                underline: !!style.underline,
-                strikethrough: !!style.strikethrough,
-            });
+            // 每个富文本 run 依然复用纯文本的 buildLayout，但这里保留原始 bearing，
+            // 统一交给行级偏移去对齐，避免 UBB/HTML 分段后字距和行高被拆散。
+            layout = font.buildLayout(
+                cmd.text,
+                style.fontSize,
+                this._letterSpacing,
+                0,
+                {
+                    underline: !!style.underline,
+                    strikethrough: !!style.strikethrough,
+                },
+                {
+                    normalizeX: false,
+                    normalizeY: false,
+                }
+            );
             styleLayouts?.set(cmd.text, layout);
         }
 
         return layout;
+    }
+
+    private resolveRichTextLineOriginShift(
+        line: MsdfRichTextLine,
+        layoutCache?: MsdfRichTextLayoutCache
+    ): { x: number; y: number } {
+        let minX = Number.POSITIVE_INFINITY;
+        let minY = Number.POSITIVE_INFINITY;
+        let cmd = line.cmd;
+
+        while (cmd) {
+            if (cmd.image) {
+                minX = Math.min(minX, cmd.x);
+                minY = Math.min(minY, cmd.y);
+                cmd = cmd.next;
+                continue;
+            }
+
+            const layout = this.getRichTextCommandLayout(cmd, layoutCache);
+            minX = Math.min(minX, cmd.x + layout.boundsLeft);
+            minY = Math.min(minY, cmd.y + layout.boundsTop);
+            cmd = cmd.next;
+        }
+
+        return {
+            x: Number.isFinite(minX) ? minX : 0,
+            y: Number.isFinite(minY) ? minY : 0,
+        };
     }
 
     private buildRunBatch(
