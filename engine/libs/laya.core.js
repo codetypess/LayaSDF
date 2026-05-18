@@ -13658,7 +13658,6 @@ window.Laya = (function (exports) {
                 new VertexElement(32, VertexElementFormat.NorUByte4, 5),
                 new VertexElement(36, VertexElementFormat.NorUByte4, 6),
                 new VertexElement(40, VertexElementFormat.NorUByte4, 7),
-                new VertexElement(44, VertexElementFormat.Byte4, 8),
             ]);
         }
         constructor() {
@@ -13709,13 +13708,13 @@ window.Laya = (function (exports) {
                 vbFloatData[f32pos + 2] = uvminx + uvs[ci] * uvu;
                 vbFloatData[f32pos + 3] = uvminy + uvs[ci + 1] * uvv;
                 vbUIntData[u32pos + 4] = packedColor;
-                vbUIntData[u32pos + 5] = MeshTextureMSDF.USE_TEX_FLAG;
+                vbUIntData[u32pos + 5] =
+                    (MeshTextureMSDF.USE_TEX_FLAG | ((packedParamsB[i] & 0x00ffffff) << 8)) >>> 0;
                 vbUIntData[u32pos + 6] = fillColors[i];
                 vbUIntData[u32pos + 7] = outlineColors[i];
                 vbUIntData[u32pos + 8] = glowColors[i];
                 vbUIntData[u32pos + 9] = shadowColors[i];
                 vbUIntData[u32pos + 10] = packedParamsA[i];
-                vbUIntData[u32pos + 11] = packedParamsB[i];
                 f32pos += 12;
                 u32pos += 12;
                 ci += 2;

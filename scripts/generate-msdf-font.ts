@@ -5,7 +5,7 @@ import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSy
 import { createRequire } from "node:module";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { injectDecorationGlyph } from "./msdf-decoration.js";
+import { DECORATION_GLYPH_CHAR, injectDecorationGlyph } from "./msdf-decoration.js";
 
 type FontGlyphMetrics = {
     left: number;
@@ -24,10 +24,21 @@ type FontGlyph = {
     xoffset?: number;
     yoffset?: number;
     metrics?: FontGlyphMetrics;
+    inkMetrics?: FontGlyphMetrics;
 };
 
 type FontJson = {
     chars?: FontGlyph[];
+    common?: {
+        lineHeight?: number;
+        base?: number;
+        scaleW?: number;
+        scaleH?: number;
+    };
+    info?: {
+        size?: number;
+        charset?: string[];
+    };
 };
 
 type OpenTypeBoundingBox = {
@@ -78,6 +89,7 @@ const opentype = require("opentype.js") as OpenTypeModule;
 const { PNG } = require("pngjs") as PngModule;
 const METRIC_PRECISION = 4;
 const DIGIT_CHARS = "0123456789";
+const DIGIT_VERTICAL_OFFSET = 1;
 const MSDF_VISIBLE_MIN = 5;
 const MSDF_VISIBLE_MAX = 250;
 
@@ -116,6 +128,43 @@ function roundMetric(value: number): number {
     return Math.round(value * 10 ** METRIC_PRECISION) / 10 ** METRIC_PRECISION;
 }
 
+function updateFontLineHeight(fontJson: FontJson): void {
+    const glyphs = fontJson.chars;
+    if (!Array.isArray(glyphs) || glyphs.length === 0) {
+        return;
+    }
+
+    let minInkTop = Number.POSITIVE_INFINITY;
+    let maxInkBottom = Number.NEGATIVE_INFINITY;
+
+    for (const glyph of glyphs) {
+        if (glyph.char === DECORATION_GLYPH_CHAR) {
+            continue;
+        }
+
+        const inkMetrics = glyph.inkMetrics ?? glyph.metrics;
+        if (!inkMetrics) {
+            continue;
+        }
+
+        minInkTop = Math.min(minInkTop, inkMetrics.top);
+        maxInkBottom = Math.max(maxInkBottom, inkMetrics.bottom);
+    }
+
+    if (!Number.isFinite(minInkTop) || !Number.isFinite(maxInkBottom)) {
+        return;
+    }
+
+    fontJson.common ??= {};
+    fontJson.common.lineHeight = Math.max(1, Math.ceil(maxInkBottom - Math.min(minInkTop, 0)));
+}
+
+function updateFontLineHeightFile(jsonPath: string): void {
+    const fontJson = JSON.parse(readFileSync(jsonPath, "utf8")) as FontJson;
+    updateFontLineHeight(fontJson);
+    writeFileSync(jsonPath, `${JSON.stringify(fontJson, null, 4)}\n`);
+}
+
 function injectGlyphMetrics(
     fontPath: string,
     jsonPath: string,
@@ -129,7 +178,7 @@ function injectGlyphMetrics(
     }
 
     const font = opentype.loadSync(fontPath);
-    const baseline = font.tables.os2.sTypoAscender * (fontSize / font.unitsPerEm);
+    const baseline = roundMetric(font.tables.os2.sTypoAscender * (fontSize / font.unitsPerEm));
     const pad = Math.floor(distanceRange / 2);
 
     for (const glyph of glyphs) {
@@ -147,6 +196,12 @@ function injectGlyphMetrics(
             continue;
         }
 
+        glyph.inkMetrics = {
+            left: roundMetric(bounds.x1),
+            top: roundMetric(bounds.y1 + baseline),
+            right: roundMetric(bounds.x2),
+            bottom: roundMetric(bounds.y2 + baseline),
+        };
         glyph.metrics = {
             left: roundMetric(bounds.x1 - pad),
             top: roundMetric(bounds.y1 - pad + baseline),
@@ -154,6 +209,9 @@ function injectGlyphMetrics(
             bottom: roundMetric(bounds.y2 + pad + baseline),
         };
     }
+
+    fontJson.common ??= {};
+    fontJson.common.base = baseline;
 
     writeFileSync(jsonPath, `${JSON.stringify(fontJson, null, 4)}\n`);
 }
@@ -241,9 +299,17 @@ function normalizeDigitRasterMetrics(texturePath: string, jsonPath: string): voi
         }
 
         if (glyph.metrics && typeof glyph.yoffset === "number" && Number.isFinite(glyph.yoffset)) {
-            const yoffset = glyph.yoffset;
-            glyph.metrics.top = yoffset;
-            glyph.metrics.bottom = yoffset + glyph.height;
+            const yoffset = glyph.yoffset + DIGIT_VERTICAL_OFFSET;
+            glyph.metrics = {
+                ...glyph.metrics,
+                top: yoffset,
+                bottom: yoffset + glyph.height,
+            };
+            glyph.inkMetrics = {
+                ...(glyph.inkMetrics ?? glyph.metrics),
+                top: yoffset,
+                bottom: yoffset + glyph.height,
+            };
         }
     }
 
@@ -259,13 +325,9 @@ function finalizeGlyphMetrics(jsonPath: string): void {
 
     for (const glyph of glyphs) {
         const xoffset =
-            typeof glyph.xoffset === "number" && Number.isFinite(glyph.xoffset)
-                ? glyph.xoffset
-                : 0;
+            typeof glyph.xoffset === "number" && Number.isFinite(glyph.xoffset) ? glyph.xoffset : 0;
         const yoffset =
-            typeof glyph.yoffset === "number" && Number.isFinite(glyph.yoffset)
-                ? glyph.yoffset
-                : 0;
+            typeof glyph.yoffset === "number" && Number.isFinite(glyph.yoffset) ? glyph.yoffset : 0;
 
         glyph.metrics ??= {
             left: xoffset,
@@ -273,6 +335,8 @@ function finalizeGlyphMetrics(jsonPath: string): void {
             right: xoffset + glyph.width,
             bottom: yoffset + glyph.height,
         };
+
+        glyph.inkMetrics ??= { ...glyph.metrics };
 
         delete glyph.xoffset;
         delete glyph.yoffset;
@@ -322,6 +386,7 @@ const args = [
     "--yes",
     "msdf-bmfont-xml",
     "--pot",
+    "--square",
     "-f",
     "json",
     "-i",
@@ -368,8 +433,9 @@ try {
     copyFileSync(generatedJson, jsonOut);
     injectGlyphMetrics(resolvedFont, jsonOut, fontSize, distanceRange);
     normalizeDigitRasterMetrics(textureOut, jsonOut);
-    injectDecorationGlyph({ texturePath: textureOut, jsonPath: jsonOut });
     finalizeGlyphMetrics(jsonOut);
+    updateFontLineHeightFile(jsonOut);
+    injectDecorationGlyph({ texturePath: textureOut, jsonPath: jsonOut });
 } finally {
     rmSync(tmpRoot, { recursive: true, force: true });
 }

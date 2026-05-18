@@ -12,6 +12,7 @@ type MsdfGlyph = {
     height: number;
     xadvance: number;
     metrics: MsdfGlyphMetrics;
+    inkMetrics: MsdfGlyphMetrics;
     x: number;
     y: number;
     page: number;
@@ -31,6 +32,7 @@ type MsdfFontJson = {
     };
     common: {
         lineHeight: number;
+        base?: number;
         scaleW: number;
         scaleH: number;
     };
@@ -46,10 +48,15 @@ type MsdfLayout = {
     uvs: Float32Array;
     indices: Uint16Array;
     quadKinds: Uint8Array;
-    lineInfos: Array<{ x: number; width: number }>;
+    lineInfos: Array<{ x: number; y: number; width: number }>;
     quadLineIndices: Uint16Array;
     width: number;
     height: number;
+    lineHeight: number;
+    blockHeight: number;
+    baseline: number;
+    inkTop: number;
+    inkBottom: number;
     boundsLeft: number;
     boundsTop: number;
     boundsRight: number;
@@ -571,6 +578,11 @@ function createEmptyLayout(): MsdfLayout {
         quadLineIndices: new Uint16Array(0),
         width: 0,
         height: 0,
+        lineHeight: 0,
+        blockHeight: 0,
+        baseline: 0,
+        inkTop: 0,
+        inkBottom: 0,
         boundsLeft: 0,
         boundsTop: 0,
         boundsRight: 0,
@@ -1275,7 +1287,9 @@ export function rgba(r: number, g: number, b: number, a: number = 1): Laya.Vecto
 }
 
 export class MsdfBitmapFont {
+    readonly designSize: number;
     readonly lineHeight: number;
+    readonly baseline: number;
     readonly atlasWidth: number;
     readonly atlasHeight: number;
     readonly distanceRange: number;
@@ -1368,18 +1382,44 @@ export class MsdfBitmapFont {
             throw new Error(`Invalid MSDF font data: ${JSON.stringify(data)}`);
         }
 
-        this.lineHeight = data.common.lineHeight;
+        this.designSize = Math.max(
+            1,
+            Number(data.info?.size) || Number(data.common.lineHeight) || 1
+        );
         this.atlasWidth = data.common.scaleW;
         this.atlasHeight = data.common.scaleH;
         this.distanceRange = data.distanceField?.distanceRange ?? 4;
+        this.baseline = Math.max(
+            0,
+            Number(data.common.base) || Math.min(Number(data.common.lineHeight) || 0, this.designSize)
+        );
+        let minInkTop = Number.POSITIVE_INFINITY;
+        let maxInkBottom = Number.NEGATIVE_INFINITY;
 
         for (const glyph of data.chars) {
             if (!hasFiniteGlyphMetrics(glyph.metrics)) {
                 const glyphLabel = glyph.char || `U+${glyph.id.toString(16).toUpperCase()}`;
                 throw new Error(`Invalid MSDF glyph metrics for ${glyphLabel}.`);
             }
+            if (!hasFiniteGlyphMetrics(glyph.inkMetrics)) {
+                const glyphLabel = glyph.char || `U+${glyph.id.toString(16).toUpperCase()}`;
+                throw new Error(`Invalid MSDF glyph ink metrics for ${glyphLabel}.`);
+            }
+
+            const inkMetrics = glyph.inkMetrics;
+            if (glyph.char !== DECORATION_SOURCE_CHAR) {
+                minInkTop = Math.min(minInkTop, inkMetrics.top);
+                maxInkBottom = Math.max(maxInkBottom, inkMetrics.bottom);
+            }
             this.glyphs.set(glyph.char, glyph);
         }
+
+        const fallbackLineHeight = Math.max(1, Number(data.common.lineHeight) || this.designSize);
+        const requiredLineAdvance =
+            Number.isFinite(minInkTop) && Number.isFinite(maxInkBottom)
+                ? maxInkBottom - Math.min(minInkTop, 0)
+                : fallbackLineHeight;
+        this.lineHeight = Math.max(fallbackLineHeight, Math.ceil(requiredLineAdvance));
 
         this.decorationGlyph = this.glyphs.get(DECORATION_SOURCE_CHAR) ?? null;
 
@@ -1409,11 +1449,15 @@ export class MsdfBitmapFont {
     }
 
     getLineHeight(fontSize: number): number {
-        return this.lineHeight * (fontSize / this.lineHeight);
+        return this.lineHeight * (fontSize / this.designSize);
+    }
+
+    getBaseline(fontSize: number): number {
+        return this.baseline * (fontSize / this.designSize);
     }
 
     measureTextWidth(text: string, fontSize: number, letterSpacing: number = 0): number {
-        const scale = fontSize / this.lineHeight;
+        const scale = fontSize / this.designSize;
         const scaledLetterSpacing = letterSpacing * scale;
         let penX = 0;
         let widestLine = 0;
@@ -1445,7 +1489,7 @@ export class MsdfBitmapFont {
             return null;
         }
 
-        const scale = fontSize / this.lineHeight;
+        const scale = fontSize / this.designSize;
         const glyphMetrics = resolveGlyphMetrics(this.decorationGlyph);
         const glyphHeight = Math.max(0, glyphMetrics.bottom - glyphMetrics.top);
         const baseThickness = Math.max(1, Math.ceil(glyphHeight * scale));
@@ -1489,7 +1533,7 @@ export class MsdfBitmapFont {
             return text;
         }
 
-        const scale = fontSize / this.lineHeight;
+        const scale = fontSize / this.designSize;
         const scaledLetterSpacing = letterSpacing * scale;
         let lineWidth = 0;
         let previousCode = -1;
@@ -1538,14 +1582,15 @@ export class MsdfBitmapFont {
         // 不处理裁剪、滚动、发光/阴影叠加顺序，也不关心最终屏幕上的偏移。
         const normalizeX = options.normalizeX !== false;
         const normalizeY = options.normalizeY !== false;
-        const scale = fontSize / this.lineHeight;
+        const scale = fontSize / this.designSize;
         const scaledLetterSpacing = letterSpacing * scale;
         const vertices: number[] = [];
         const uvs: number[] = [];
         const indices: number[] = [];
         const quadKinds: number[] = [];
         const quadLineIndices: number[] = [];
-        const lineHeight = this.lineHeight * scale;
+        const lineHeight = this.getLineHeight(fontSize);
+        const baseline = this.getBaseline(fontSize);
         const lineInfos: Array<{ y: number; advanceWidth: number; left: number; right: number }> = [
             {
                 y: 0,
@@ -1561,6 +1606,8 @@ export class MsdfBitmapFont {
         let minY = Number.POSITIVE_INFINITY;
         let maxX = Number.NEGATIVE_INFINITY;
         let maxY = Number.NEGATIVE_INFINITY;
+        let minVisibleY = Number.POSITIVE_INFINITY;
+        let maxVisibleY = Number.NEGATIVE_INFINITY;
         let quadCount = 0;
         let lineCount = 1;
         let currentLineWidth = 0;
@@ -1575,7 +1622,9 @@ export class MsdfBitmapFont {
             right: number,
             bottom: number,
             quadKind: number = QUAD_KIND_TEXT,
-            targetLineIndex: number = lineIndex
+            targetLineIndex: number = lineIndex,
+            visibleTop: number = top,
+            visibleBottom: number = bottom
         ): void => {
             // 每个字形或装饰线最终都对应一个带 UV 的四边形。
             const u0 = glyph.x / this.atlasWidth;
@@ -1603,6 +1652,8 @@ export class MsdfBitmapFont {
             minY = Math.min(minY, top);
             maxX = Math.max(maxX, right);
             maxY = Math.max(maxY, bottom);
+            minVisibleY = Math.min(minVisibleY, visibleTop);
+            maxVisibleY = Math.max(maxVisibleY, visibleBottom);
             quadCount += 1;
         };
 
@@ -1638,16 +1689,29 @@ export class MsdfBitmapFont {
             }
 
             const metrics = resolveGlyphMetrics(glyph);
+            const inkMetrics = glyph.inkMetrics;
             const left = penX + metrics.left * scale;
             const top = penY + metrics.top * scale;
             const right = penX + metrics.right * scale;
             const bottom = penY + metrics.bottom * scale;
+            const visibleTop = penY + inkMetrics.top * scale;
+            const visibleBottom = penY + inkMetrics.bottom * scale;
             const line = lineInfos[lineIndex];
 
             line.left = Math.min(line.left, left);
             line.right = Math.max(line.right, right);
 
-            pushQuad(glyph, left, top, right, bottom);
+            pushQuad(
+                glyph,
+                left,
+                top,
+                right,
+                bottom,
+                QUAD_KIND_TEXT,
+                lineIndex,
+                visibleTop,
+                visibleBottom
+            );
 
             penX += glyph.xadvance * scale + scaledLetterSpacing;
             currentLineWidth = Math.max(currentLineWidth, penX);
@@ -1710,23 +1774,32 @@ export class MsdfBitmapFont {
             }
         }
 
+        const rawBlockHeight = lineCount * lineHeight + Math.max(0, lineCount - 1) * lineSpacing;
         const hasQuads = quadCount > 0;
         const shiftX = hasQuads && normalizeX && Number.isFinite(minX) ? minX : 0;
-        const shiftY = hasQuads && normalizeY && Number.isFinite(minY) ? minY : 0;
+        const shiftY =
+            hasQuads && Number.isFinite(minY)
+                ? normalizeY
+                    ? minY
+                    : Math.min(Number.isFinite(minVisibleY) ? minVisibleY : minY, 0)
+                : 0;
+        const topInset = shiftY < 0 ? -shiftY : 0;
         const normalizedLineInfos = lineInfos.map((line) => {
             if (!Number.isFinite(line.left) || !Number.isFinite(line.right)) {
                 return {
                     x: 0,
+                    y: line.y + topInset,
                     width: line.advanceWidth,
                 };
             }
 
             return {
                 x: line.left - shiftX,
+                y: line.y + topInset,
                 width: line.right - line.left,
             };
         });
-        const blockHeight = lineCount * lineHeight + Math.max(0, lineCount - 1) * lineSpacing;
+        const blockHeight = rawBlockHeight + topInset;
 
         if (!hasQuads) {
             return {
@@ -1738,6 +1811,11 @@ export class MsdfBitmapFont {
                 quadLineIndices: new Uint16Array(0),
                 width: widestLine,
                 height: blockHeight,
+                lineHeight,
+                blockHeight,
+                baseline: baseline + topInset,
+                inkTop: 0,
+                inkBottom: blockHeight,
                 boundsLeft: 0,
                 boundsTop: 0,
                 boundsRight: 0,
@@ -1752,7 +1830,11 @@ export class MsdfBitmapFont {
         const boundsRight = maxX - shiftX;
         const boundsBottom = maxY - shiftY;
         const boundsWidth = boundsRight - Math.min(0, boundsLeft);
-        const boundsHeight = boundsBottom - Math.min(0, boundsTop);
+        const inkTop = Number.isFinite(minVisibleY) ? minVisibleY - shiftY : 0;
+        const inkBottom = Number.isFinite(maxVisibleY) ? maxVisibleY - shiftY : blockHeight;
+        const contentHeight = Number.isFinite(maxVisibleY)
+            ? Math.max(blockHeight, inkBottom - Math.min(0, inkTop))
+            : blockHeight;
 
         for (let i = 0; i < vertices.length; i += 2) {
             vertices[i] -= shiftX;
@@ -1767,13 +1849,14 @@ export class MsdfBitmapFont {
             lineInfos: normalizedLineInfos,
             quadLineIndices: new Uint16Array(quadLineIndices),
             width: Math.max(widestLine, boundsWidth),
-            // 使用理论行高（blockHeight）而非字形实际边界（boundsHeight），
-            // 原因：boundsHeight 包含 MSDF SDF padding 以及超出 lineHeight 的字形
-            // bearing（如全角分号 ；BottomBearing > lineHeight），会导致高度
-            // 比富文本路径多约 4px，在 HTML/非HTML 模式之间造成不一致。
-            // blockHeight = N × lineHeight + (N-1) × lineSpacing
-            // 与富文本路径的 measureRichTextLines 保持一致。
-            height: blockHeight,
+            // 内容高度以字体级行盒为主，但若真实墨迹超出理论行高仍要补足，
+            // 这样 descender / 组合字符在 hidden / scroll / fit-content 下不会被裁掉。
+            height: contentHeight,
+            lineHeight,
+            blockHeight,
+            baseline: baseline + topInset,
+            inkTop,
+            inkBottom,
             boundsLeft,
             boundsTop,
             boundsRight,
@@ -4186,13 +4269,17 @@ export class MsdfText extends Laya.Text {
         return layoutText.split("\n").map((lineText, index) => {
             const line = this._layout.lineInfos[index];
             const lineWidth = font.measureTextWidth(lineText, this._fontSize, this._letterSpacing);
-            const lineInfo = line ?? { x: 0, width: lineWidth };
+            const lineInfo = line ?? {
+                x: 0,
+                y: index * (this._layout.lineHeight + this._lineSpacing),
+                width: lineWidth,
+            };
 
             return createTextLineMetric(
                 this.resolvePlainTextLineOffsetX(lineInfo, contentBoxWidth, shrinkScale),
-                index * (font.getLineHeight(this._fontSize) + this._lineSpacing) * shrinkScale,
+                lineInfo.y * shrinkScale,
                 lineWidth * shrinkScale,
-                font.getLineHeight(this._fontSize) * shrinkScale,
+                this._layout.lineHeight * shrinkScale,
                 this._defaultAlign,
                 lineText,
                 this._fontSize,
@@ -4503,7 +4590,7 @@ export class MsdfText extends Laya.Text {
             metricCache: new WeakMap(),
             lineX: 0,
             lineY: 0,
-            lastHeight: font.getLineHeight(this._runs[0]?.style.fontSize ?? font.lineHeight),
+            lastHeight: font.getLineHeight(this._runs[0]?.style.fontSize ?? this._fontSize),
             currentLine: null,
             lastCmd: null,
         };
@@ -6029,7 +6116,7 @@ export class MsdfText extends Laya.Text {
         layoutCache?: MsdfRichTextLayoutCache
     ): { x: number; y: number } {
         let minX = Number.POSITIVE_INFINITY;
-        let minY = Number.POSITIVE_INFINITY;
+        let minY = 0;
         let cmd = line.cmd;
 
         while (cmd) {
@@ -6042,13 +6129,15 @@ export class MsdfText extends Laya.Text {
 
             const layout = this.getRichTextCommandLayout(cmd, layoutCache);
             minX = Math.min(minX, cmd.x + layout.boundsLeft);
-            minY = Math.min(minY, cmd.y + layout.boundsTop);
+            // 富文本 run 只在 X 方向抵消 glyph bearing。
+            // Y 方向若再用 boundsTop 回推，会把 HTML/UBB 文本整体下压，
+            // 和纯文本路径产生不必要的垂直偏移。
             cmd = cmd.next;
         }
 
         return {
             x: Number.isFinite(minX) ? minX : 0,
-            y: Number.isFinite(minY) ? minY : 0,
+            y: minY,
         };
     }
 

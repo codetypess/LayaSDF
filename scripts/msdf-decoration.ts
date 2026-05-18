@@ -23,6 +23,12 @@ type FontGlyph = Rect & {
         right: number;
         bottom: number;
     };
+    inkMetrics?: {
+        left: number;
+        top: number;
+        right: number;
+        bottom: number;
+    };
     chnl?: number;
     page?: number;
 };
@@ -278,6 +284,12 @@ export function injectDecorationGlyph({ texturePath, jsonPath }: DecorationGlyph
         height: glyphMetrics.height,
         xadvance: glyphMetrics.xadvance,
         metrics: {
+            left: glyphMetrics.left,
+            top: glyphMetrics.top,
+            right: glyphMetrics.left + glyphMetrics.width,
+            bottom: glyphMetrics.top + glyphMetrics.height,
+        },
+        inkMetrics: {
             left: glyphMetrics.left,
             top: glyphMetrics.top,
             right: glyphMetrics.left + glyphMetrics.width,

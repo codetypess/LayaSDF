@@ -18,7 +18,6 @@ Shader3D Start
         a_msdfGlowColor: Vector4,
         a_msdfShadowColor: Vector4,
         a_msdfPackedParamsA: Vector4,
-        a_msdfPackedParamsB: Vector4,
     },
     defines: {
         TEXTUREVS: { type: bool, default: true }
@@ -44,7 +43,7 @@ GLSL Start
     varying vec4 v_msdfGlowColor;
     varying vec4 v_msdfShadowColor;
     varying vec4 v_msdfPackedParamsA;
-    varying vec4 v_msdfPackedParamsB;
+    varying vec3 v_msdfPackedParamsB;
 
     void main() {
         vertexInfo info;
@@ -59,7 +58,7 @@ GLSL Start
         v_msdfGlowColor = a_msdfGlowColor;
         v_msdfShadowColor = a_msdfShadowColor;
         v_msdfPackedParamsA = a_msdfPackedParamsA;
-        v_msdfPackedParamsB = a_msdfPackedParamsB;
+        v_msdfPackedParamsB = a_attribFlags.yzw;
 
         vec4 pos;
         getPosition(pos);
@@ -88,7 +87,7 @@ GLSL Start
     varying vec4 v_msdfGlowColor;
     varying vec4 v_msdfShadowColor;
     varying vec4 v_msdfPackedParamsA;
-    varying vec4 v_msdfPackedParamsB;
+    varying vec3 v_msdfPackedParamsB;
 
     const float PACKED_EFFECT_SIZE_MAX = 32.0;
     const float PACKED_FACE_DILATE_MAX = 16.0;
@@ -112,6 +111,15 @@ GLSL Start
         }
 
         return raw / 127.0 * maxValue;
+    }
+
+    float unpackSignedByte(float value) {
+        float raw = floor(value + 0.5);
+        if (raw > 127.0) {
+            raw -= 256.0;
+        }
+
+        return raw;
     }
 
     void main() {
@@ -138,7 +146,10 @@ GLSL Start
         float glowSize = hasGlow ? v_msdfPackedParamsA.y * PACKED_EFFECT_SIZE_MAX : 0.0;
         float shadowBlur = hasShadow ? v_msdfPackedParamsA.z * PACKED_EFFECT_SIZE_MAX : 0.0;
         float faceDilate = unpackSignedNormalizedByte(v_msdfPackedParamsA.w, PACKED_FACE_DILATE_MAX);
-        vec2 shadowOffset = v_msdfPackedParamsB.xy * SHADOW_OFFSET_INV_SCALE;
+        vec2 shadowOffset = vec2(
+            unpackSignedByte(v_msdfPackedParamsB.x),
+            unpackSignedByte(v_msdfPackedParamsB.y)
+        ) * SHADOW_OFFSET_INV_SCALE;
 
         // 这里开始统一使用“距离场单位”描述效果宽度。
         // faceDilate / outline / glow / shadowBlur / shadowOffset 都会随字号一起缩放。
